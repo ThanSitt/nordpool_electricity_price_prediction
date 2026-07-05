@@ -1,0 +1,54 @@
+name: Daily Electricity Price Forecast
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # 14:00 Helsinki (EEST = UTC+3)
+  workflow_dispatch:         # allows manual trigger from GitHub UI
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write API config
+        run: |
+          cat > src/config.py <<'PYEOF'
+          from pathlib import Path
+          FINGRID_API_KEY = '${{ secrets.FINGRID_API_KEY }}'
+          ROOT             = Path(__file__).resolve().parent.parent
+          SAVED_MODELS_DIR = ROOT / 'models' / 'saved'
+          FORECAST_CSV     = ROOT / 'predictions' / 'forecasts.csv'
+          HELSINKI         = 'Europe/Helsinki'
+          PYEOF
+
+      - name: Restore previous forecasts
+        run: |
+          git fetch origin
+          git checkout origin/${{ github.ref_name }} -- predictions/forecasts.csv 2>/dev/null \
+            && echo "Restored existing forecasts.csv" \
+            || echo "No previous forecasts.csv — starting fresh"
+
+      - name: Run prediction system
+        run: python src/predict_system.py
+
+      - name: Commit and push updated forecasts
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add predictions/forecasts.csv
+          git diff --staged --quiet \
+            && echo "No changes to commit" \
+            || git commit -m "forecast: $(date -u '+%Y-%m-%d') daily update"
+          git push origin HEAD:${{ github.ref_name }}
