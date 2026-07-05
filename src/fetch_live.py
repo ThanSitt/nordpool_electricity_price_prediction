@@ -132,7 +132,7 @@ def _parse_fmi(xml_text: str) -> pd.DataFrame:
 def _fetch_block(start: pd.Timestamp, end: pd.Timestamp,
                  forecast: bool) -> pd.DataFrame:
     """One block of weather (observed or forecast) as standardised DataFrame."""
-    sq = ('fmi::forecast::hirlam::surface::point::simple'
+    sq = ('fmi::forecast::harmonie::surface::point::simple'
           if forecast else 'fmi::observations::weather::simple')
     params = 'temperature,windspeedms,winddirection'
 
