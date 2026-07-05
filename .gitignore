@@ -1,0 +1,44 @@
+# Windows crash dumps
+*.stackdump
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+*.egg-info/
+
+# Data files (large — tracked separately or regenerated)
+*.parquet
+
+# Trained model artifacts
+*.pkl
+!models/saved/xgboost_v*.pkl
+!models/saved/lightgbm_v2.pkl
+*.joblib
+*.model
+*.bin
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# API keys and secrets — NEVER commit to public repo
+src/config.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
