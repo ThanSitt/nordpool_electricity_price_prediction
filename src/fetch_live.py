@@ -140,13 +140,17 @@ def fetch_weather(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     now = pd.Timestamp.now(tz=_HELSINKI)
     all_hours = pd.date_range(start, end, freq='1h', tz=_HELSINKI)
 
+    _OBS_LIMIT = pd.Timedelta(hours=168)  # FMI observations max window
+
     if end <= now:
-        df = _fetch_block(start, end, forecast=False)
+        obs_start = max(start, end - _OBS_LIMIT)
+        df = _fetch_block(obs_start, end, forecast=False)
     elif start >= now:
         hirlam_end = min(end, now + pd.Timedelta(hours=54))
         df = _fetch_block(start, hirlam_end, forecast=True)
     else:
-        obs   = _fetch_block(start, now, forecast=False)
+        obs_start = max(start, now - _OBS_LIMIT)
+        obs   = _fetch_block(obs_start, now, forecast=False)
         fcast = _fetch_block(now, min(end, now + pd.Timedelta(hours=54)), forecast=True)
         df    = pd.concat([obs, fcast]).sort_index()
         df    = df[~df.index.duplicated(keep='last')]
