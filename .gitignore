@@ -25,6 +25,7 @@ venv/
 *.pkl
 !models/saved/xgboost_v*.pkl
 !models/saved/lightgbm_v2.pkl
+!models/saved/lightgbm_v2_5.pkl
 *.joblib
 *.model
 *.bin
