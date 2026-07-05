@@ -29,10 +29,10 @@ jobs:
           cat > src/config.py <<'PYEOF'
           from pathlib import Path
           FINGRID_API_KEY = '${{ secrets.FINGRID_API_KEY }}'
-          ROOT             = Path(__file__).resolve().parent.parent
-          SAVED_MODELS_DIR = ROOT / 'models' / 'saved'
-          FORECAST_CSV     = ROOT / 'predictions' / 'forecasts.csv'
-          HELSINKI         = 'Europe/Helsinki'
+          ROOT              = Path(__file__).resolve().parent.parent
+          SAVED_MODELS_DIR  = ROOT / 'models' / 'saved'
+          PREDICTIONS_DIR   = ROOT / 'predictions'
+          HELSINKI          = 'Europe/Helsinki'
           PYEOF
 
       - name: Restore previous forecasts
