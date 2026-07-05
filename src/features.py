@@ -97,11 +97,19 @@ class WeatherBuffer:
             ts = ts.tz_localize(_HELSINKI)
         ts_hr = ts.replace(minute=0, second=0, microsecond=0)
 
+        if self._df.empty:
+            temp, wind, wdir = np.nan, np.nan, 180.0
+            return {
+                'temp': temp, 'wind_speed': wind, 'wind_direction_deg': wdir,
+                'wind_dir_sin': 0.0, 'wind_dir_cos': -1.0,
+                'HDD': np.nan, 'wind_power_proxy': np.nan,
+            }
+
         if ts_hr in self._df.index:
             row = self._df.loc[ts_hr]
         else:
             earlier = self._df.loc[:ts_hr]
-            row = earlier.iloc[-1] if not earlier.empty else self._df.iloc[-1]
+            row = earlier.iloc[-1] if not earlier.empty else self._df.iloc[0]
 
         temp = float(row.get('temp', 0.0))
         wind = float(row.get('wind_speed', 0.0))
