@@ -132,9 +132,16 @@ def _parse_fmi(xml_text: str) -> pd.DataFrame:
 def _fetch_block(start: pd.Timestamp, end: pd.Timestamp,
                  forecast: bool) -> pd.DataFrame:
     """One block of weather (observed or forecast) as standardised DataFrame."""
-    sq = ('fmi::forecast::harmonie::surface::point::simple'
-          if forecast else 'fmi::observations::weather::simple')
-    params = 'temperature,windspeedms,winddirection'
+    if forecast:
+        sq     = 'fmi::forecast::edited::weather::scandinavia::point::simple'
+        params = 'temperature,windspeedms,winddirection'
+        # column names after _parse_fmi lowercases ParameterName
+        temp_col, wind_col, dir_col = 'temperature', 'windspeedms', 'winddirection'
+    else:
+        sq     = 'fmi::observations::weather::simple'
+        params = 't2m,ws_10min,wd_10min'
+        # FMI observation parameter IDs (different from forecast names)
+        temp_col, wind_col, dir_col = 't2m', 'ws_10min', 'wd_10min'
 
     try:
         temp_df = _parse_fmi(_fmi_request(sq, _TEMP_LATLON, params, start, end))
@@ -157,19 +164,18 @@ def _fetch_block(start: pd.Timestamp, end: pd.Timestamp,
         return pd.DataFrame(columns=_WX_COLS)
 
     result = pd.DataFrame(index=idx, dtype=float)
-    result['temp'] = temp_df['temperature'].reindex(idx) if (not temp_df.empty and 'temperature' in temp_df.columns) else np.nan
+    result['temp']             = temp_df[temp_col].reindex(idx) if (not temp_df.empty and temp_col in temp_df.columns) else np.nan
 
     if not wind_df.empty:
-        result['wind_speed']         = wind_df['windspeedms'].reindex(idx)   if 'windspeedms'   in wind_df.columns else np.nan
-        result['wind_direction_deg'] = wind_df['winddirection'].reindex(idx) if 'winddirection' in wind_df.columns else np.nan
+        result['wind_speed']         = wind_df[wind_col].reindex(idx) if wind_col in wind_df.columns else np.nan
+        result['wind_direction_deg'] = wind_df[dir_col].reindex(idx)  if dir_col  in wind_df.columns else np.nan
     elif not temp_df.empty:
-        result['wind_speed']         = temp_df['windspeedms'].reindex(idx)   if 'windspeedms'   in temp_df.columns else np.nan
-        result['wind_direction_deg'] = temp_df['winddirection'].reindex(idx) if 'winddirection' in temp_df.columns else np.nan
+        result['wind_speed']         = temp_df[wind_col].reindex(idx) if wind_col in temp_df.columns else np.nan
+        result['wind_direction_deg'] = temp_df[dir_col].reindex(idx)  if dir_col  in temp_df.columns else np.nan
     else:
         result['wind_speed']         = np.nan
         result['wind_direction_deg'] = np.nan
 
-    # guarantee all 3 columns exist before selecting
     for col in _WX_COLS:
         if col not in result.columns:
             result[col] = np.nan
@@ -206,8 +212,12 @@ def fetch_weather(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
             obs_start = max(start, now - _OBS_LIMIT)
             obs   = _fetch_block(obs_start, now, forecast=False)
             fcast = _fetch_block(hirlam_start, min(end, hirlam_start + pd.Timedelta(hours=54)), forecast=True)
-            df    = pd.concat([obs, fcast]).sort_index()
-            df    = df[~df.index.duplicated(keep='last')]
+            # only concat when fcast has a DatetimeIndex — empty RangeIndex corrupts the merge
+            if not fcast.empty and isinstance(fcast.index, pd.DatetimeIndex):
+                df = pd.concat([obs, fcast]).sort_index()
+                df = df[~df.index.duplicated(keep='last')]
+            else:
+                df = obs
     except Exception as e:
         print(f'  WARNING: weather fetch failed entirely: {e} — using NaN weather')
         df = pd.DataFrame(columns=_WX_COLS)
