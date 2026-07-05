@@ -190,17 +190,22 @@ def fetch_weather(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
 
     _OBS_LIMIT = pd.Timedelta(hours=168)  # FMI observations max window
 
+    # HIRLAM forecasts are published at 00/06/12/18 UTC — snap start to last boundary
+    hirlam_start = now.tz_convert('UTC').replace(minute=0, second=0, microsecond=0)
+    hirlam_start = hirlam_start - pd.Timedelta(hours=hirlam_start.hour % 6)
+    hirlam_start = hirlam_start.tz_convert(_HELSINKI)
+
     try:
         if end <= now:
             obs_start = max(start, end - _OBS_LIMIT)
             df = _fetch_block(obs_start, end, forecast=False)
         elif start >= now:
-            hirlam_end = min(end, now + pd.Timedelta(hours=54))
-            df = _fetch_block(start, hirlam_end, forecast=True)
+            hirlam_end = min(end, hirlam_start + pd.Timedelta(hours=54))
+            df = _fetch_block(hirlam_start, hirlam_end, forecast=True)
         else:
             obs_start = max(start, now - _OBS_LIMIT)
             obs   = _fetch_block(obs_start, now, forecast=False)
-            fcast = _fetch_block(now, min(end, now + pd.Timedelta(hours=54)), forecast=True)
+            fcast = _fetch_block(hirlam_start, min(end, hirlam_start + pd.Timedelta(hours=54)), forecast=True)
             df    = pd.concat([obs, fcast]).sort_index()
             df    = df[~df.index.duplicated(keep='last')]
     except Exception as e:
