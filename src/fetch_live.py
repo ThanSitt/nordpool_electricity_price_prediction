@@ -18,10 +18,12 @@ import config
 _TIMEOUT  = 60
 _HELSINKI = config.HELSINKI
 
-# Helsinki-Vantaa Airport (temperature source, same as training data)
-_TEMP_LATLON = '60.3172,24.9633'
-# Oulu area (wind source, same as training data)
-_WIND_LATLON = '65.0126,25.4647'
+# Forecast uses latlon (grid interpolation — works fine)
+_TEMP_LATLON = '60.3172,24.9633'   # Helsinki-Vantaa Airport
+_WIND_LATLON = '65.0126,25.4647'   # Oulu area
+# Observations use place= (FMI obs latlon lookup is broken — returns 0 results)
+_TEMP_PLACE  = 'Helsinki'
+_WIND_PLACE  = 'Oulu'
 
 _WX_COLS = ['temp', 'wind_speed', 'wind_direction_deg']
 
@@ -62,18 +64,20 @@ def fetch_prices(start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
 
 # ── FMI (weather) ──────────────────────────────────────────────────────────────
 
-def _fmi_request(storedquery: str, latlon: str, params: str,
-                 start: pd.Timestamp, end: pd.Timestamp) -> str:
+def _fmi_request(storedquery: str, location: dict, params: str,
+                 start: pd.Timestamp, end: pd.Timestamp,
+                 timestep: int | None = None) -> str:
     """HTTP GET to FMI WFS with 3 retries on transient errors."""
     url_params = {
         'service': 'WFS', 'version': '2.0.0', 'request': 'getFeature',
         'storedquery_id': storedquery,
-        'latlon': latlon,
+        **location,
         'parameters': params,
         'starttime': start.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ'),
         'endtime':   end.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'timestep': '60',
     }
+    if timestep is not None:
+        url_params['timestep'] = str(timestep)
     for attempt in range(3):
         try:
             r = requests.get('https://opendata.fmi.fi/wfs',
@@ -133,24 +137,28 @@ def _fetch_block(start: pd.Timestamp, end: pd.Timestamp,
                  forecast: bool) -> pd.DataFrame:
     """One block of weather (observed or forecast) as standardised DataFrame."""
     if forecast:
-        sq     = 'fmi::forecast::edited::weather::scandinavia::point::simple'
-        params = 'temperature,windspeedms,winddirection'
-        # column names after _parse_fmi lowercases ParameterName
+        sq       = 'fmi::forecast::edited::weather::scandinavia::point::simple'
+        params   = 'temperature,windspeedms,winddirection'
+        timestep = 60
+        temp_loc = {'latlon': _TEMP_LATLON}
+        wind_loc = {'latlon': _WIND_LATLON}
         temp_col, wind_col, dir_col = 'temperature', 'windspeedms', 'winddirection'
     else:
-        sq     = 'fmi::observations::weather::simple'
-        params = 't2m,ws_10min,wd_10min'
-        # FMI observation parameter IDs (different from forecast names)
+        sq       = 'fmi::observations::weather::simple'
+        params   = 't2m,ws_10min,wd_10min'
+        timestep = None  # FMI obs API ignores timestep — let it return native 10-min data
+        temp_loc = {'place': _TEMP_PLACE}   # latlon broken for FMI obs, use place=
+        wind_loc = {'place': _WIND_PLACE}
         temp_col, wind_col, dir_col = 't2m', 'ws_10min', 'wd_10min'
 
     try:
-        temp_df = _parse_fmi(_fmi_request(sq, _TEMP_LATLON, params, start, end))
+        temp_df = _parse_fmi(_fmi_request(sq, temp_loc, params, start, end, timestep))
     except Exception as e:
         print(f'  WARNING: temp fetch failed: {e}')
         temp_df = pd.DataFrame()
 
     try:
-        wind_df = _parse_fmi(_fmi_request(sq, _WIND_LATLON, params, start, end))
+        wind_df = _parse_fmi(_fmi_request(sq, wind_loc, params, start, end, timestep))
     except Exception as e:
         print(f'  WARNING: wind fetch failed: {e}')
         wind_df = pd.DataFrame()
