@@ -64,6 +64,32 @@ def test(label, sq, latlon, params, start, end, timestep=None, place=None, **kwa
 
 
 if __name__ == '__main__':
+    # ── window size tests ──────────────────────────────────────────────────────
+    test('OBS place=Helsinki  2h window',
+         'fmi::observations::weather::simple',
+         None, 't2m,ws_10min,wd_10min',
+         '2026-07-05T22:00:00Z', '2026-07-06T00:00:00Z',
+         place='Helsinki')
+
+    test('OBS place=Helsinki  24h window',
+         'fmi::observations::weather::simple',
+         None, 't2m,ws_10min,wd_10min',
+         '2026-07-05T12:00:00Z', '2026-07-06T12:00:00Z',
+         place='Helsinki')
+
+    test('OBS place=Helsinki  168h (7-day) window',
+         'fmi::observations::weather::simple',
+         None, 't2m,ws_10min,wd_10min',
+         '2026-06-29T12:00:00Z', '2026-07-06T12:00:00Z',
+         place='Helsinki')
+
+    test('OBS place=Oulu  24h window',
+         'fmi::observations::weather::simple',
+         None, 't2m,ws_10min,wd_10min',
+         '2026-07-05T12:00:00Z', '2026-07-06T12:00:00Z',
+         place='Oulu')
+
+    # ── old tests (A–F) ───────────────────────────────────────────────────────
     # A: add maxlocations=1 (nearest station lookup)
     test('OBS latlon + maxlocations=1',
          'fmi::observations::weather::simple',
