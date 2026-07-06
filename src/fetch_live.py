@@ -152,13 +152,17 @@ def _fetch_block(start: pd.Timestamp, end: pd.Timestamp,
         temp_col, wind_col, dir_col = 't2m', 'ws_10min', 'wd_10min'
 
     try:
-        temp_df = _parse_fmi(_fmi_request(sq, temp_loc, params, start, end, timestep))
+        _xml = _fmi_request(sq, temp_loc, params, start, end, timestep)
+        temp_df = _parse_fmi(_xml)
+        print(f'  [DBG] temp  loc={temp_loc} rows={len(temp_df)} cols={list(temp_df.columns) if not temp_df.empty else []} xml_len={len(_xml)}')
     except Exception as e:
         print(f'  WARNING: temp fetch failed: {e}')
         temp_df = pd.DataFrame()
 
     try:
-        wind_df = _parse_fmi(_fmi_request(sq, wind_loc, params, start, end, timestep))
+        _xml = _fmi_request(sq, wind_loc, params, start, end, timestep)
+        wind_df = _parse_fmi(_xml)
+        print(f'  [DBG] wind  loc={wind_loc} rows={len(wind_df)} cols={list(wind_df.columns) if not wind_df.empty else []} xml_len={len(_xml)}')
     except Exception as e:
         print(f'  WARNING: wind fetch failed: {e}')
         wind_df = pd.DataFrame()
@@ -169,6 +173,7 @@ def _fetch_block(start: pd.Timestamp, end: pd.Timestamp,
     elif not wind_df.empty:
         idx = wind_df.index
     else:
+        print(f'  [DBG] both temp_df and wind_df empty — returning empty block')
         return pd.DataFrame(columns=_WX_COLS)
 
     result = pd.DataFrame(index=idx, dtype=float)
