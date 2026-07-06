@@ -179,12 +179,11 @@ def _fetch_block(start: pd.Timestamp, end: pd.Timestamp,
     result = pd.DataFrame(index=idx, dtype=float)
     result['temp']             = temp_df[temp_col].reindex(idx) if (not temp_df.empty and temp_col in temp_df.columns) else np.nan
 
-    if not wind_df.empty:
-        result['wind_speed']         = wind_df[wind_col].reindex(idx) if wind_col in wind_df.columns else np.nan
-        result['wind_direction_deg'] = wind_df[dir_col].reindex(idx)  if dir_col  in wind_df.columns else np.nan
-    elif not temp_df.empty:
-        result['wind_speed']         = temp_df[wind_col].reindex(idx) if wind_col in temp_df.columns else np.nan
-        result['wind_direction_deg'] = temp_df[dir_col].reindex(idx)  if dir_col  in temp_df.columns else np.nan
+    # prefer wind station; fall back to temp station if wind cols are missing
+    wind_src = wind_df if (not wind_df.empty and wind_col in wind_df.columns) else temp_df
+    if not wind_src.empty and wind_col in wind_src.columns:
+        result['wind_speed']         = wind_src[wind_col].reindex(idx)
+        result['wind_direction_deg'] = wind_src[dir_col].reindex(idx) if dir_col in wind_src.columns else np.nan
     else:
         result['wind_speed']         = np.nan
         result['wind_direction_deg'] = np.nan
@@ -205,7 +204,9 @@ def fetch_weather(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     Returns a fully-indexed DataFrame (ffill+bfill) — never crashes.
     """
     now = pd.Timestamp.now(tz=_HELSINKI)
-    all_hours = pd.date_range(start, end, freq='1h', tz=_HELSINKI)
+    # round start down to nearest hour so all_hours aligns with obs/forecast :00 timestamps
+    start_h = start.replace(minute=0, second=0, microsecond=0)
+    all_hours = pd.date_range(start_h, end, freq='1h', tz=_HELSINKI)
 
     _OBS_LIMIT = pd.Timedelta(hours=168)  # FMI observations max window
 
