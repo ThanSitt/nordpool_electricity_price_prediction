@@ -20,15 +20,15 @@ resolution.
 
 ## What is included
 
-| Area | Contents |
-| --- | --- |
-| Raw data | Finnish spot prices, Helsinki-Vantaa temperature, Oulu wind data |
-| Cleaned data | Hourly and 15-minute aligned CSVs in `data/convertData/` |
-| Feature engineering | V2 hourly and V2.5 15-minute feature notebooks and outputs |
-| Models | Six saved bundles in `models/saved/` |
-| Live prediction | `src/predict_system.py`, `src/fetch_live.py`, `src/features.py` |
-| Tests | Offline regression tests in `tests/` |
-| Automation | Daily GitHub Actions forecast workflow |
+| Area                | Contents                                                         |
+| ------------------- | ---------------------------------------------------------------- |
+| Raw data            | Finnish spot prices, Helsinki-Vantaa temperature, Oulu wind data |
+| Cleaned data        | Hourly and 15-minute aligned CSVs in `data/convertData/`         |
+| Feature engineering | V2 hourly and V2.5 15-minute feature notebooks and outputs       |
+| Models              | Six saved bundles in `models/saved/`                             |
+| Live prediction     | `src/predict_system.py`, `src/fetch_live.py`, `src/features.py`  |
+| Tests               | Offline regression tests in `tests/`                             |
+| Automation          | Daily GitHub Actions forecast workflow                           |
 
 Current saved model bundles:
 
