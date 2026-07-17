@@ -1,5 +1,9 @@
 # Reports
 
-`report1.pdf` was an empty placeholder and has been removed. Model results and
-methodology are documented in the training notebooks and the repository README.
-Add only generated, non-empty report artifacts to this directory.
+This directory is for generated report artifacts only.
+
+The old `report1.pdf` placeholder has been removed. Model methodology and
+results are documented in the training notebooks and in the main repository
+README.
+
+Only add non-empty, generated files here.
