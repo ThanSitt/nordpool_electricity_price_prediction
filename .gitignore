@@ -36,7 +36,8 @@ Thumbs.db
 desktop.ini
 
 # API keys and secrets — NEVER commit to public repo
-src/config.py
+.env
+src/config.local.py
 
 # IDE
 .vscode/
