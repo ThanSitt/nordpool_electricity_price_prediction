@@ -82,7 +82,7 @@ class PriceBuffer:
 # ── weather buffer ─────────────────────────────────────────────────────────────
 
 class WeatherBuffer:
-    """Hourly weather lookup with forward-fill for future timestamps."""
+    """Hourly weather lookup with deterministic rolling-window helpers."""
 
     def __init__(self, df: pd.DataFrame):
         self._df = df.copy()
@@ -123,6 +123,20 @@ class WeatherBuffer:
             'HDD':               max(0.0, 17.0 - temp),
             'wind_power_proxy':  wind ** 3,
         }
+
+    def rolling_minutes(self, ts, minutes: int, fn) -> float:
+        """Statistic over preceding 15-minute weather slots, excluding ``ts``."""
+        values = [self.get(pd.Timestamp(ts) - pd.Timedelta(minutes=15 * i))['temp']
+                  for i in range(1, minutes // 15 + 1)]
+        clean = [value for value in values if not np.isnan(value)]
+        return float(fn(clean)) if clean else np.nan
+
+    def rolling_hours(self, ts, hours: int, fn) -> float:
+        """Statistic over preceding hourly weather values, excluding ``ts``."""
+        values = [self.get(pd.Timestamp(ts) - pd.Timedelta(hours=i))['temp']
+                  for i in range(1, hours + 1)]
+        clean = [value for value in values if not np.isnan(value)]
+        return float(fn(clean)) if clean else np.nan
 
 
 # ── feature builder ────────────────────────────────────────────────────────────
@@ -178,9 +192,10 @@ def build_features(dt: pd.Timestamp,
     f['air_temp_mean']   = w['temp']       # V1 renamed columns
     f['wind_speed_mean'] = w['wind_speed']
 
-    # temperature lags / rolling (use WeatherBuffer for accuracy)
-    f['temp_rolling_mean_24h'] = wx.get(dt - pd.Timedelta(hours=12))['temp']  # midpoint proxy
-    f['temp_rolling_mean_1h']  = wx.get(dt - pd.Timedelta(minutes=30))['temp']
+    # Use preceding-window semantics, matching the training data instead of
+    # approximating a rolling value with a single midpoint observation.
+    f['temp_rolling_mean_24h'] = wx.rolling_hours(dt, 24, np.mean)
+    f['temp_rolling_mean_1h']  = wx.rolling_minutes(dt, 60, np.mean)
     f['temp_lag_24h']  = wx.get(dt - pd.Timedelta(hours=24))['temp']
     f['temp_lag_168h'] = wx.get(dt - pd.Timedelta(hours=168))['temp']
     f['temp_lag_4']    = wx.get(dt - pd.Timedelta(minutes=60))['temp']   # 4×15min = 1h
