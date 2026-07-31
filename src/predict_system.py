@@ -1,21 +1,16 @@
-"""
-src/predict_system.py — daily electricity price prediction system
+"""Daily Finland electricity-price forecasting system.
 
-Run once a day (ideally after 13:00 Helsinki time, when Nordpool day-ahead
-prices for tomorrow have been published):
+Run after Nord Pool has published the next delivery day's prices:
 
-    conda activate nordpool
     python src/predict_system.py
 
-On each run:
-  1. Fetches last 200 hours of actual prices from Fingrid (lag buffer)
-  2. Fetches actual + forecast weather from FMI
-  3. Generates 7-day ahead hourly forecasts from all saved models
-  4. Saves one CSV per model to predictions/<model_name>_forecasts.csv
-  5. Back-fills actual_price / abs_error for past predictions now available
+Each run fetches a 15-minute FI price history and weather forecasts, creates a
+seven-day recursive forecast at every model's native resolution, back-fills
+available actuals, and writes one CSV per model.
 """
 
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -29,60 +24,38 @@ import config
 import fetch_live
 import features as feat_lib
 
-FORECAST_HOURS = 7 * 24   # 168 hours ahead
+FORECAST_HOURS = config.FORECAST_HOURS
 CSV_COLS = ['run_date', 'target_datetime', 'predicted_price', 'actual_price', 'abs_error']
 
 
-# ── model loading ──────────────────────────────────────────────────────────────
-
 def load_models() -> dict:
+    """Load all model bundles, each of which declares its feature contract."""
     models = {}
     for pkl in sorted(config.SAVED_MODELS_DIR.glob('*.pkl')):
         try:
             meta = joblib.load(pkl)
             models[pkl.stem] = meta
-            print(f'  loaded {pkl.stem}  '
-                  f'({len(meta["feature_cols"])} features, {meta["step_min"]}min)')
-        except Exception as e:
-            print(f'  [skip] {pkl.name}: {e}')
+            print(f'  loaded {pkl.stem} ({len(meta["feature_cols"])} features, {meta["step_min"]} min)')
+        except Exception as exc:
+            print(f'  [skip] {pkl.name}: {exc}')
     return models
 
 
-# ── forecasting ────────────────────────────────────────────────────────────────
-
 def run_forecast(model, feature_cols: list[str], step_min: int,
-                 start_dt: pd.Timestamp,
-                 price_buf: feat_lib.PriceBuffer,
-                 wx_buf: feat_lib.WeatherBuffer) -> list[tuple]:
-    """
-    Recursive multi-step forecast for FORECAST_HOURS hours.
-
-    Each predicted price is immediately added to the price buffer so that
-    subsequent steps use it for their lag features.
-    """
-    results = []
-    step_td = pd.Timedelta(minutes=step_min)
-    n_steps = FORECAST_HOURS * (60 // step_min)
-
-    for i in range(n_steps):
-        dt = start_dt + i * step_td
-        feat = feat_lib.build_features(dt, price_buf, wx_buf)
-        row  = pd.DataFrame([{c: feat.get(c, np.nan) for c in feature_cols}])[feature_cols]
-        pred = float(model.predict(row)[0])
-        price_buf.add(dt, pred)
-        results.append((dt, pred))
-
+                 start_dt: pd.Timestamp, price_buf: feat_lib.PriceBuffer,
+                 wx_buf: feat_lib.WeatherBuffer) -> list[tuple[pd.Timestamp, float]]:
+    """Recursively produce seven days of predictions at ``step_min`` resolution."""
+    step = pd.Timedelta(minutes=step_min)
+    results: list[tuple[pd.Timestamp, float]] = []
+    for i in range(FORECAST_HOURS * (60 // step_min)):
+        timestamp = start_dt + i * step
+        features = feat_lib.build_features(timestamp, price_buf, wx_buf)
+        row = pd.DataFrame([{column: features.get(column, np.nan) for column in feature_cols}])[feature_cols]
+        prediction = float(model.predict(row)[0])
+        price_buf.add(timestamp, prediction)
+        results.append((timestamp, prediction))
     return results
 
-
-def to_hourly(preds: list[tuple]) -> list[tuple]:
-    """Average 15-min predictions into hourly slots."""
-    df = pd.DataFrame(preds, columns=['dt', 'price'])
-    df['dt_hr'] = df['dt'].apply(lambda x: x.replace(minute=0))
-    return list(df.groupby('dt_hr')['price'].mean().items())
-
-
-# ── per-model CSV management ───────────────────────────────────────────────────
 
 def csv_path(model_name: str) -> Path:
     return config.PREDICTIONS_DIR / f'{model_name}_forecasts.csv'
@@ -90,112 +63,120 @@ def csv_path(model_name: str) -> Path:
 
 def load_csv(model_name: str) -> pd.DataFrame:
     path = csv_path(model_name)
-    if path.exists():
-        df = pd.read_csv(path, parse_dates=['run_date', 'target_datetime'])
-        for col in ('run_date', 'target_datetime'):
-            if df[col].dt.tz is None:
-                df[col] = df[col].dt.tz_localize('UTC').dt.tz_convert(config.HELSINKI)
-            else:
-                df[col] = df[col].dt.tz_convert(config.HELSINKI)
-        return df
-    return pd.DataFrame(columns=CSV_COLS)
+    if not path.exists():
+        return pd.DataFrame(columns=CSV_COLS)
+    frame = pd.read_csv(path, parse_dates=['run_date', 'target_datetime'])
+    for column in ('run_date', 'target_datetime'):
+        if frame[column].dt.tz is None:
+            frame[column] = frame[column].dt.tz_localize('UTC').dt.tz_convert(config.HELSINKI)
+        else:
+            frame[column] = frame[column].dt.tz_convert(config.HELSINKI)
+    return frame
 
 
-def save_csv(df: pd.DataFrame, model_name: str):
+def save_csv(frame: pd.DataFrame, model_name: str) -> None:
     config.PREDICTIONS_DIR.mkdir(exist_ok=True)
-    df.to_csv(csv_path(model_name), index=False)
+    frame.to_csv(csv_path(model_name), index=False)
 
 
-def fill_actuals(df: pd.DataFrame, actual_prices: pd.Series) -> pd.DataFrame:
-    """Fill in actual_price and abs_error for past predictions now available."""
-    price_map = {}
-    for ts, v in actual_prices.items():
-        key = ts.tz_convert(config.HELSINKI).replace(minute=0, second=0, microsecond=0)
-        price_map[key] = float(v)
+def fill_actuals(frame: pd.DataFrame, actual_prices: pd.Series, step_min: int) -> pd.DataFrame:
+    """Back-fill actual prices at the same resolution as the saved forecast."""
+    if frame.empty:
+        return frame
+    if step_min == 60:
+        evaluation_prices = actual_prices.resample('1h').mean()
+    elif step_min == 15:
+        evaluation_prices = actual_prices
+    else:
+        raise ValueError(f'Unsupported model step: {step_min} minutes')
 
-    mask = df['actual_price'].isna()
-    for idx in df[mask].index:
-        tgt = pd.Timestamp(df.at[idx, 'target_datetime'])
-        if tgt.tzinfo is None:
-            tgt = tgt.tz_localize(config.HELSINKI)
-        tgt = tgt.tz_convert(config.HELSINKI).replace(minute=0, second=0, microsecond=0)
-        if tgt in price_map:
-            actual = price_map[tgt]
-            df.at[idx, 'actual_price'] = actual
-            df.at[idx, 'abs_error']    = abs(actual - df.at[idx, 'predicted_price'])
-    return df
+    price_map = {
+        timestamp.tz_convert(config.HELSINKI).floor(f'{step_min}min'): float(value)
+        for timestamp, value in evaluation_prices.items()
+    }
+    for idx in frame[frame['actual_price'].isna()].index:
+        target = pd.Timestamp(frame.at[idx, 'target_datetime'])
+        if target.tzinfo is None:
+            target = target.tz_localize(config.HELSINKI)
+        target = target.tz_convert(config.HELSINKI).floor(f'{step_min}min')
+        if target in price_map:
+            actual = price_map[target]
+            frame.at[idx, 'actual_price'] = actual
+            frame.at[idx, 'abs_error'] = abs(actual - frame.at[idx, 'predicted_price'])
+    return frame
 
 
-# ── main ───────────────────────────────────────────────────────────────────────
+def _history_for_model(actual_prices: pd.Series, step_min: int) -> pd.Series:
+    """Return a price history at the resolution used during model training."""
+    if step_min == 15:
+        return actual_prices
+    if step_min == 60:
+        return actual_prices.resample('1h').mean()
+    raise ValueError(f'Unsupported model step: {step_min} minutes')
 
-def main():
-    now           = pd.Timestamp.now(tz=config.HELSINKI)
-    predict_start = (now + pd.Timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
 
-    print(f'\nRun time       : {now.strftime("%Y-%m-%d %H:%M %Z")}')
-    print(f'Forecast start : {predict_start.strftime("%Y-%m-%d %H:%M")}')
-    print(f'Forecast end   : {(predict_start + pd.Timedelta(hours=FORECAST_HOURS - 1)).strftime("%Y-%m-%d %H:%M")}')
+def main() -> None:
+    now = pd.Timestamp.now(tz=config.HELSINKI)
+    # A day-ahead run begins at the next local delivery day, never halfway
+    # through a day whose market price may already be published.
+    predict_start = now.normalize() + pd.Timedelta(days=1)
+    predict_end = predict_start + pd.Timedelta(hours=FORECAST_HOURS) - pd.Timedelta(minutes=15)
 
-    hist_start = now - pd.Timedelta(hours=200)
-    print(f'\nFetching prices {hist_start.strftime("%Y-%m-%d")} → now ...')
-    actual_prices = fetch_live.fetch_prices(hist_start, now)
-    print(f'  got {len(actual_prices)} hourly price records')
+    print(f'\nRun time       : {now:%Y-%m-%d %H:%M %Z}')
+    print(f'Forecast start : {predict_start:%Y-%m-%d %H:%M}')
+    print(f'Forecast end   : {predict_end:%Y-%m-%d %H:%M}')
 
-    wx_end = predict_start + pd.Timedelta(hours=FORECAST_HOURS)
-    print(f'Fetching weather {hist_start.strftime("%Y-%m-%d")} → {wx_end.strftime("%Y-%m-%d")} ...')
-    weather_df = fetch_live.fetch_weather(hist_start, wx_end)
+    history_start = now - pd.Timedelta(hours=config.PRICE_HISTORY_HOURS)
+    print(f'\nFetching FI prices {history_start:%Y-%m-%d} → now ...')
+    actual_prices = fetch_live.fetch_prices(history_start, now)
+    print(f'  got {len(actual_prices)} price records')
+
+    weather_end = predict_start + pd.Timedelta(hours=FORECAST_HOURS)
+    print(f'Fetching weather {history_start:%Y-%m-%d} → {weather_end:%Y-%m-%d} ...')
+    weather_df = fetch_live.fetch_weather(history_start, weather_end)
     print(f'  got {len(weather_df)} hourly weather records')
-
-    price_buf = feat_lib.PriceBuffer(actual_prices)
-    wx_buf    = feat_lib.WeatherBuffer(weather_df)
+    weather_buf = feat_lib.WeatherBuffer(weather_df)
 
     print('\nLoading models ...')
     models = load_models()
     if not models:
-        print('\nNo models found in', config.SAVED_MODELS_DIR)
-        return
+        raise RuntimeError(f'No readable models in {config.SAVED_MODELS_DIR}')
 
-    print('\nGenerating 7-day ahead forecasts ...')
-
+    print('\nGenerating seven-day forecasts ...')
+    run_day = now.normalize()
     for model_name, meta in models.items():
-        # load existing CSV and back-fill any newly available actuals
-        df = load_csv(model_name)
-        df = fill_actuals(df, actual_prices)
+        step_min = int(meta['step_min'])
+        frame = fill_actuals(load_csv(model_name), actual_prices, step_min)
+        # A manual retry replaces this day's rows rather than duplicating them.
+        run_dates = pd.to_datetime(frame['run_date'], errors='coerce')
+        frame = frame[run_dates.dt.normalize() != run_day]
 
-        # each model gets its own copy of the price buffer
-        buf_copy    = feat_lib.PriceBuffer()
-        buf_copy._d = dict(price_buf._d)
+        price_buf = feat_lib.PriceBuffer(_history_for_model(actual_prices, step_min))
+        predictions = run_forecast(meta['model'], meta['feature_cols'], step_min,
+                                   predict_start, price_buf, weather_buf)
+        new_rows = pd.DataFrame([
+            {
+                'run_date': now,
+                'target_datetime': timestamp,
+                'predicted_price': round(prediction, 4),
+                'actual_price': np.nan,
+                'abs_error': np.nan,
+            }
+            for timestamp, prediction in predictions
+        ], columns=CSV_COLS)
+        frame = pd.concat([frame, new_rows], ignore_index=True)
+        frame = frame.drop_duplicates(subset=['run_date', 'target_datetime'], keep='last')
+        frame = frame.sort_values(['run_date', 'target_datetime']).reset_index(drop=True)
+        save_csv(frame, model_name)
+        print(f'  {model_name}: {len(predictions)} {step_min}-minute steps → {csv_path(model_name).name}')
 
-        raw_preds    = run_forecast(meta['model'], meta['feature_cols'],
-                                    meta['step_min'], predict_start,
-                                    buf_copy, wx_buf)
-        hourly_preds = to_hourly(raw_preds) if meta['step_min'] == 15 else raw_preds
-
-        new_rows = [{
-            'run_date':        now,
-            'target_datetime': dt,
-            'predicted_price': round(pred, 4),
-            'actual_price':    np.nan,
-            'abs_error':       np.nan,
-        } for dt, pred in hourly_preds]
-
-        df = pd.concat([df, pd.DataFrame(new_rows, columns=CSV_COLS)],
-                       ignore_index=True)
-        save_csv(df, model_name)
-        print(f'  {model_name}: {len(hourly_preds)} hours → {csv_path(model_name).name}')
-
-    # accuracy summary across all model CSVs
     print('\nAccuracy summary (evaluated predictions):')
-    any_evaluated = False
     for model_name in models:
-        df = load_csv(model_name)
-        done = df.dropna(subset=['actual_price'])
-        if not done.empty:
-            mae = done['abs_error'].mean()
-            print(f'  {model_name}: MAE={mae:.4f}  ({len(done)} evaluated)')
-            any_evaluated = True
-    if not any_evaluated:
-        print('  No evaluated predictions yet (check back after the first week).')
+        evaluated = load_csv(model_name).dropna(subset=['actual_price'])
+        if evaluated.empty:
+            print(f'  {model_name}: no evaluated predictions yet')
+        else:
+            print(f'  {model_name}: MAE={evaluated["abs_error"].mean():.4f} ({len(evaluated)} evaluated)')
 
 
 if __name__ == '__main__':
