@@ -1,11 +1,13 @@
-"""
-src/fetch_live.py — live data fetchers
+"""Live market and weather data fetchers.
 
-fetch_prices(start, end)  → pd.Series  (hourly EUR/MWh from Fingrid)
-fetch_weather(start, end) → pd.DataFrame (hourly temp/wind from FMI)
+``fetch_prices`` returns Finland (FI) Nord Pool day-ahead prices at their
+published resolution.  ``fetch_weather`` combines FMI observations/short-range
+forecast with an Open-Meteo long-range forecast so a seven-day run never
+silently reuses a 54-hour weather forecast for the remaining days.
 """
 
 from __future__ import annotations
+
 import time
 import xml.etree.ElementTree as ET
 
@@ -15,77 +17,102 @@ import requests
 
 import config
 
-_TIMEOUT  = 60
+_TIMEOUT = 60
 _HELSINKI = config.HELSINKI
 
-# Helsinki-Vantaa Airport (temperature source, same as training data)
-_TEMP_LATLON = '60.3172,24.9633'
-# Oulu area (wind source, same as training data)
-_WIND_LATLON = '65.0126,25.4647'
+# Forecast uses grid interpolation. Observations use place= because FMI's
+# observation endpoint does not reliably resolve arbitrary lat/lon requests.
+_TEMP_LATLON = '60.3172,24.9633'  # Helsinki-Vantaa Airport
+_WIND_LATLON = '65.0126,25.4647'  # Oulu area
+_TEMP_PLACE = 'Helsinki'
+_WIND_PLACE = 'Oulu'
 
+_TEMP_COORDS = (60.3172, 24.9633)
+_WIND_COORDS = (65.0126, 25.4647)
 _WX_COLS = ['temp', 'wind_speed', 'wind_direction_deg']
 
 
-# ── Fingrid (electricity prices) ───────────────────────────────────────────────
+def _to_helsinki(ts: pd.Timestamp) -> pd.Timestamp:
+    ts = pd.Timestamp(ts)
+    if ts.tzinfo is None:
+        return ts.tz_localize(_HELSINKI)
+    return ts.tz_convert(_HELSINKI)
+
+
+# --- Nord Pool FI day-ahead prices via Elering's public NPS endpoint ---------
 
 def fetch_prices(start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
-    """
-    Finland day-ahead electricity prices from Fingrid dataset 105.
-    Returns hourly pd.Series indexed by Helsinki-timezone timestamps.
-    """
-    url     = 'https://data.fingrid.fi/api/datasets/105/data'
-    headers = {'x-api-key': config.FINGRID_API_KEY}
+    """Return FI Nord Pool day-ahead prices indexed in Helsinki time.
 
-    start_utc = start.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
-    end_utc   = end.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
+    The previous implementation requested Fingrid dataset 105.  That dataset
+    is down-regulation bid volume (MW), not an electricity price, which is why
+    it produced a long sequence of zeros.  Elering's NPS endpoint exposes the
+    FI area price directly and includes quarter-hour values where available.
+    """
+    start = _to_helsinki(start)
+    end = _to_helsinki(end)
+    if end <= start:
+        raise ValueError('end must be later than start')
+
+    response = requests.get(
+        config.ELERING_PRICE_URL,
+        params={
+            'start': start.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'end': end.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ'),
+        },
+        timeout=_TIMEOUT,
+    )
+    response.raise_for_status()
+    body = response.json()
+    rows = body.get('data', {}).get('fi', [])
+    if not body.get('success') or not rows:
+        raise RuntimeError('No FI Nord Pool prices returned by Elering')
 
     records: dict[pd.Timestamp, float] = {}
-    page = 1
-    while True:
-        resp = requests.get(url, headers=headers, params={
-            'startTime': start_utc, 'endTime': end_utc,
-            'format': 'json', 'page': page, 'pageSize': 10000, 'locale': 'en',
-        }, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        body = resp.json()
-        for row in body['data']:
-            dt = (pd.Timestamp(row['startTime'])
-                  .tz_convert(_HELSINKI)
-                  .replace(second=0, microsecond=0))
-            records[dt] = float(row['value'])
-        if page >= body['pagination']['lastPage']:
-            break
-        page += 1
+    for row in rows:
+        try:
+            timestamp = pd.to_datetime(row['timestamp'], unit='s', utc=True).tz_convert(_HELSINKI)
+            price = float(row['price'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start <= timestamp <= end:
+            records[timestamp] = price
 
-    return pd.Series(records, name='price').sort_index()
+    series = pd.Series(records, name='price', dtype=float).sort_index()
+    if series.empty:
+        raise RuntimeError('Elering returned no FI price records in the requested interval')
+    if len(series) >= 24 and series.eq(0).all():
+        raise RuntimeError('All returned FI prices are zero; refusing to evaluate forecasts with invalid market data')
+    return series
 
 
-# ── FMI (weather) ──────────────────────────────────────────────────────────────
+# --- FMI weather ---------------------------------------------------------------
 
-def _fmi_request(storedquery: str, latlon: str, params: str,
-                 start: pd.Timestamp, end: pd.Timestamp) -> str:
-    """HTTP GET to FMI WFS with 3 retries on transient errors."""
+def _fmi_request(storedquery: str, location: dict, params: str,
+                 start: pd.Timestamp, end: pd.Timestamp,
+                 timestep: int | None = None) -> str:
+    """HTTP GET to FMI WFS with three retries for transient failures."""
     url_params = {
         'service': 'WFS', 'version': '2.0.0', 'request': 'getFeature',
         'storedquery_id': storedquery,
-        'latlon': latlon,
+        **location,
         'parameters': params,
         'starttime': start.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'endtime':   end.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'timestep': '60',
+        'endtime': end.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ'),
     }
+    if timestep is not None:
+        url_params['timestep'] = str(timestep)
     for attempt in range(3):
         try:
-            r = requests.get('https://opendata.fmi.fi/wfs',
-                             params=url_params, timeout=_TIMEOUT)
-            r.raise_for_status()
-            return r.text
-        except requests.RequestException as e:
+            response = requests.get('https://opendata.fmi.fi/wfs', params=url_params, timeout=_TIMEOUT)
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException as exc:
             if attempt == 2:
                 raise
-            print(f'  FMI request failed (attempt {attempt+1}/3): {e} — retrying...')
+            print(f'  FMI request failed (attempt {attempt + 1}/3): {exc}; retrying...')
             time.sleep(5)
-    return ''  # unreachable but keeps type checker happy
+    raise AssertionError('unreachable')
 
 
 def _parse_fmi(xml_text: str) -> pd.DataFrame:
@@ -97,133 +124,164 @@ def _parse_fmi(xml_text: str) -> pd.DataFrame:
     except ET.ParseError:
         return pd.DataFrame()
 
-    # FMI sometimes wraps errors in a 200 ExceptionReport — detect and skip
-    for elem in root.iter():
-        if elem.tag.endswith('}ExceptionReport') or elem.tag == 'ExceptionReport':
-            print(f'  FMI returned ExceptionReport: {xml_text[:300]}')
-            return pd.DataFrame()
+    if any(elem.tag.endswith('}ExceptionReport') or elem.tag == 'ExceptionReport' for elem in root.iter()):
+        print(f'  FMI returned ExceptionReport: {xml_text[:300]}')
+        return pd.DataFrame()
 
     rows: list[dict] = []
     for elem in root.iter():
         if not elem.tag.endswith('}BsWfsElement') and elem.tag != 'BsWfsElement':
             continue
-        r: dict[str, str] = {}
+        record: dict[str, str] = {}
         for child in elem:
             local = child.tag.split('}')[-1]
             if local in ('Time', 'ParameterName', 'ParameterValue'):
-                r[local] = child.text or ''
-        if len(r) < 3 or r.get('ParameterValue', 'NaN') in ('NaN', ''):
+                record[local] = child.text or ''
+        if len(record) < 3 or record.get('ParameterValue') in ('NaN', ''):
             continue
         try:
-            val = float(r['ParameterValue'])
-        except ValueError:
+            value = float(record['ParameterValue'])
+            timestamp = pd.Timestamp(record['Time']).tz_convert(_HELSINKI).replace(second=0, microsecond=0)
+        except (TypeError, ValueError):
             continue
-        dt = (pd.Timestamp(r['Time'])
-              .tz_convert(_HELSINKI)
-              .replace(second=0, microsecond=0))
-        rows.append({'datetime': dt, 'param': r['ParameterName'].lower(), 'value': val})
+        rows.append({'datetime': timestamp, 'param': record['ParameterName'].lower(), 'value': value})
 
     if not rows:
         return pd.DataFrame()
-    df = pd.DataFrame(rows)
-    return df.pivot_table(index='datetime', columns='param', values='value', aggfunc='first')
+    frame = pd.DataFrame(rows)
+    return frame.pivot_table(index='datetime', columns='param', values='value', aggfunc='first')
 
 
-def _fetch_block(start: pd.Timestamp, end: pd.Timestamp,
-                 forecast: bool) -> pd.DataFrame:
-    """One block of weather (observed or forecast) as standardised DataFrame."""
+def _fetch_fmi_block(start: pd.Timestamp, end: pd.Timestamp, forecast: bool) -> pd.DataFrame:
     if forecast:
-        sq     = 'fmi::forecast::edited::weather::scandinavia::point::simple'
-        params = 'temperature,windspeedms,winddirection'
-        # column names after _parse_fmi lowercases ParameterName
-        temp_col, wind_col, dir_col = 'temperature', 'windspeedms', 'winddirection'
+        storedquery = 'fmi::forecast::edited::weather::scandinavia::point::simple'
+        params, timestep = 'temperature,windspeedms,winddirection', 60
+        temp_loc, wind_loc = {'latlon': _TEMP_LATLON}, {'latlon': _WIND_LATLON}
+        temp_col, wind_col, direction_col = 'temperature', 'windspeedms', 'winddirection'
     else:
-        sq     = 'fmi::observations::weather::simple'
-        params = 't2m,ws_10min,wd_10min'
-        # FMI observation parameter IDs (different from forecast names)
-        temp_col, wind_col, dir_col = 't2m', 'ws_10min', 'wd_10min'
+        storedquery = 'fmi::observations::weather::simple'
+        params, timestep = 't2m,ws_10min,wd_10min', None
+        temp_loc, wind_loc = {'place': _TEMP_PLACE}, {'place': _WIND_PLACE}
+        temp_col, wind_col, direction_col = 't2m', 'ws_10min', 'wd_10min'
 
     try:
-        temp_df = _parse_fmi(_fmi_request(sq, _TEMP_LATLON, params, start, end))
-    except Exception as e:
-        print(f'  WARNING: temp fetch failed: {e}')
+        temp_df = _parse_fmi(_fmi_request(storedquery, temp_loc, params, start, end, timestep))
+    except Exception as exc:
+        print(f'  WARNING: temperature fetch failed: {exc}')
         temp_df = pd.DataFrame()
-
     try:
-        wind_df = _parse_fmi(_fmi_request(sq, _WIND_LATLON, params, start, end))
-    except Exception as e:
-        print(f'  WARNING: wind fetch failed: {e}')
+        wind_df = _parse_fmi(_fmi_request(storedquery, wind_loc, params, start, end, timestep))
+    except Exception as exc:
+        print(f'  WARNING: wind fetch failed: {exc}')
         wind_df = pd.DataFrame()
 
-    # build result index from whichever source has data
-    if not temp_df.empty:
-        idx = temp_df.index
-    elif not wind_df.empty:
-        idx = wind_df.index
-    else:
+    if temp_df.empty and wind_df.empty:
         return pd.DataFrame(columns=_WX_COLS)
-
-    result = pd.DataFrame(index=idx, dtype=float)
-    result['temp']             = temp_df[temp_col].reindex(idx) if (not temp_df.empty and temp_col in temp_df.columns) else np.nan
-
-    if not wind_df.empty:
-        result['wind_speed']         = wind_df[wind_col].reindex(idx) if wind_col in wind_df.columns else np.nan
-        result['wind_direction_deg'] = wind_df[dir_col].reindex(idx)  if dir_col  in wind_df.columns else np.nan
-    elif not temp_df.empty:
-        result['wind_speed']         = temp_df[wind_col].reindex(idx) if wind_col in temp_df.columns else np.nan
-        result['wind_direction_deg'] = temp_df[dir_col].reindex(idx)  if dir_col  in temp_df.columns else np.nan
-    else:
-        result['wind_speed']         = np.nan
-        result['wind_direction_deg'] = np.nan
-
-    for col in _WX_COLS:
-        if col not in result.columns:
-            result[col] = np.nan
-
+    index = temp_df.index if not temp_df.empty else wind_df.index
+    result = pd.DataFrame(index=index, dtype=float)
+    result['temp'] = temp_df[temp_col].reindex(index) if temp_col in temp_df else np.nan
+    wind_source = wind_df if wind_col in wind_df else temp_df
+    result['wind_speed'] = wind_source[wind_col].reindex(index) if wind_col in wind_source else np.nan
+    result['wind_direction_deg'] = wind_source[direction_col].reindex(index) if direction_col in wind_source else np.nan
     return result[_WX_COLS].dropna(how='all')
 
 
+# --- Long-range weather --------------------------------------------------------
+
+def _fetch_open_meteo_point(latitude: float, longitude: float) -> pd.DataFrame:
+    response = requests.get(
+        config.OPEN_METEO_FORECAST_URL,
+        params={
+            'latitude': latitude,
+            'longitude': longitude,
+            'hourly': 'temperature_2m,wind_speed_10m,wind_direction_10m',
+            'wind_speed_unit': 'ms',
+            'timezone': _HELSINKI,
+            # A run launched in the afternoon forecasts from next midnight;
+            # request extra calendar days so the full seven delivery days are
+            # covered even near the end of today's API window.
+            'forecast_days': 10,
+        },
+        timeout=_TIMEOUT,
+    )
+    response.raise_for_status()
+    hourly = response.json().get('hourly', {})
+    times = hourly.get('time', [])
+    if not times:
+        return pd.DataFrame()
+    index = pd.DatetimeIndex(pd.to_datetime(times)).tz_localize(_HELSINKI, ambiguous='NaT', nonexistent='shift_forward')
+    result = pd.DataFrame(index=index)
+    result['temp'] = hourly.get('temperature_2m', np.nan)
+    result['wind_speed'] = hourly.get('wind_speed_10m', np.nan)
+    result['wind_direction_deg'] = hourly.get('wind_direction_10m', np.nan)
+    return result[~result.index.isna()]
+
+
+def _fetch_open_meteo_weather() -> pd.DataFrame:
+    """Use Helsinki temperature and Oulu wind, matching the training stations."""
+    temp = _fetch_open_meteo_point(*_TEMP_COORDS)
+    wind = _fetch_open_meteo_point(*_WIND_COORDS)
+    if temp.empty and wind.empty:
+        return pd.DataFrame(columns=_WX_COLS)
+    index = temp.index if not temp.empty else wind.index
+    result = pd.DataFrame(index=index)
+    result['temp'] = temp['temp'].reindex(index) if 'temp' in temp else np.nan
+    result['wind_speed'] = wind['wind_speed'].reindex(index) if 'wind_speed' in wind else np.nan
+    result['wind_direction_deg'] = wind['wind_direction_deg'].reindex(index) if 'wind_direction_deg' in wind else np.nan
+    return result[_WX_COLS]
+
+
 def fetch_weather(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    """
-    Hourly weather DataFrame with columns [temp, wind_speed, wind_direction_deg].
+    """Return hourly weather without fabricating a seven-day forecast.
 
-    Uses FMI observations for past data and HIRLAM forecast for future.
-    HIRLAM covers ~54 hours ahead; beyond that the last value is held constant.
-    Returns a fully-indexed DataFrame (ffill+bfill) — never crashes.
+    FMI observations cover history and its HIRLAM product supplies short-range
+    data.  Open-Meteo supplies the remaining horizon.  If the long-range source
+    is unavailable for a requested seven-day run, this function fails instead
+    of silently forward-filling the last weather observation.
     """
+    start, end = _to_helsinki(start), _to_helsinki(end)
     now = pd.Timestamp.now(tz=_HELSINKI)
-    all_hours = pd.date_range(start, end, freq='1h', tz=_HELSINKI)
+    start_hour = start.floor('h')
+    all_hours = pd.date_range(start_hour, end.ceil('h'), freq='1h', tz=_HELSINKI)
+    observation_limit = pd.Timedelta(hours=168)
 
-    _OBS_LIMIT = pd.Timedelta(hours=168)  # FMI observations max window
-
-    # HIRLAM forecasts are published at 00/06/12/18 UTC — snap start to last boundary
-    hirlam_start = now.tz_convert('UTC').replace(minute=0, second=0, microsecond=0)
-    hirlam_start = hirlam_start - pd.Timedelta(hours=hirlam_start.hour % 6)
+    hirlam_start = now.tz_convert('UTC').floor('h')
+    hirlam_start -= pd.Timedelta(hours=hirlam_start.hour % 6)
     hirlam_start = hirlam_start.tz_convert(_HELSINKI)
+    hirlam_end = hirlam_start + pd.Timedelta(hours=54)
 
     try:
         if end <= now:
-            obs_start = max(start, end - _OBS_LIMIT)
-            df = _fetch_block(obs_start, end, forecast=False)
+            fmi = _fetch_fmi_block(max(start, end - observation_limit), end, forecast=False)
         elif start >= now:
-            hirlam_end = min(end, hirlam_start + pd.Timedelta(hours=54))
-            df = _fetch_block(hirlam_start, hirlam_end, forecast=True)
+            fmi = _fetch_fmi_block(hirlam_start, min(end, hirlam_end), forecast=True)
         else:
-            obs_start = max(start, now - _OBS_LIMIT)
-            obs   = _fetch_block(obs_start, now, forecast=False)
-            fcast = _fetch_block(hirlam_start, min(end, hirlam_start + pd.Timedelta(hours=54)), forecast=True)
-            # only concat when fcast has a DatetimeIndex — empty RangeIndex corrupts the merge
-            if not fcast.empty and isinstance(fcast.index, pd.DatetimeIndex):
-                df = pd.concat([obs, fcast]).sort_index()
-                df = df[~df.index.duplicated(keep='last')]
-            else:
-                df = obs
-    except Exception as e:
-        print(f'  WARNING: weather fetch failed entirely: {e} — using NaN weather')
-        df = pd.DataFrame(columns=_WX_COLS)
+            observations = _fetch_fmi_block(max(start, now - observation_limit), now, forecast=False)
+            forecast = _fetch_fmi_block(hirlam_start, min(end, hirlam_end), forecast=True)
+            fmi = pd.concat([observations, forecast]).sort_index()
+            fmi = fmi[~fmi.index.duplicated(keep='last')]
+    except Exception as exc:
+        print(f'  WARNING: FMI weather fetch failed: {exc}')
+        fmi = pd.DataFrame(columns=_WX_COLS)
 
-    result = df.reindex(all_hours).ffill().bfill()
+    long_range_needed = end > hirlam_end
+    open_meteo = pd.DataFrame(columns=_WX_COLS)
+    if end > now:
+        try:
+            open_meteo = _fetch_open_meteo_weather()
+        except Exception as exc:
+            if long_range_needed:
+                raise RuntimeError(f'Long-range weather forecast unavailable: {exc}') from exc
+            print(f'  WARNING: Open-Meteo forecast unavailable: {exc}')
+
+    result = fmi.reindex(all_hours).combine_first(open_meteo.reindex(all_hours))
+    # Check coverage before filling small source gaps.  Checking afterwards
+    # would make a stale FMI value look like a valid long-range forecast.
+    if long_range_needed:
+        long_range_rows = result.index > hirlam_end
+        if result.loc[long_range_rows].isna().any().any():
+            raise RuntimeError('Long-range weather coverage is incomplete')
+    result = result.ffill().bfill()
     if result.empty or result.isna().all().all():
-        print('  WARNING: no weather data available — all weather features will be NaN')
-        result = pd.DataFrame(np.nan, index=all_hours, columns=_WX_COLS)
-    return result
+        raise RuntimeError('No weather data available for forecast features')
+    return result[_WX_COLS]
