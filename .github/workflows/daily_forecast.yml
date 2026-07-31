@@ -2,55 +2,50 @@ name: Daily Electricity Price Forecast
 
 on:
   schedule:
-    - cron: '0 11 * * *'   # 14:00 Helsinki (EEST = UTC+3)
-  workflow_dispatch:         # allows manual trigger from GitHub UI
+    # 11:00 UTC = 13:00 EET in winter / 14:00 EEST in summer.
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-electricity-forecast
+  cancel-in-progress: false
 
 jobs:
   forecast:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          cache: pip
 
-      - name: Install dependencies
+      - name: Install pinned dependencies
         run: pip install -r requirements.txt
 
-      - name: Write API config
-        run: |
-          cat > src/config.py <<'PYEOF'
-          from pathlib import Path
-          FINGRID_API_KEY = '${{ secrets.FINGRID_API_KEY }}'
-          ROOT              = Path(__file__).resolve().parent.parent
-          SAVED_MODELS_DIR  = ROOT / 'models' / 'saved'
-          PREDICTIONS_DIR   = ROOT / 'predictions'
-          HELSINKI          = 'Europe/Helsinki'
-          PYEOF
-
-      - name: Restore previous forecasts
-        run: |
-          git fetch origin
-          git checkout origin/${{ github.ref_name }} -- predictions/ 2>/dev/null \
-            && echo "Restored existing forecast CSVs" \
-            || echo "No previous forecasts — starting fresh"
+      - name: Run offline regression tests
+        run: python -m unittest discover -s tests -v
 
       - name: Run prediction system
         run: python src/predict_system.py
 
-      - name: Commit and push updated forecasts
+      - name: Commit updated forecasts
         run: |
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add predictions/
-          git diff --staged --quiet \
-            && echo "No changes to commit" \
-            || git commit -m "forecast: $(date -u '+%Y-%m-%d') daily update"
-          git push origin HEAD:${{ github.ref_name }}
+          if git diff --staged --quiet; then
+            echo "No forecast changes to commit"
+          else
+            git commit -m "forecast: $(date -u '+%Y-%m-%d') daily update"
+            git push origin HEAD:${{ github.ref_name }}
+          fi

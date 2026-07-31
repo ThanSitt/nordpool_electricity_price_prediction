@@ -1,146 +1,148 @@
-# Nordpool Electricity Price Prediction
+# Finland Nord Pool Electricity Price Prediction
 
-Predict Finland electricity spot prices using weather data and engineered features.
+This repository predicts Finland (`FI`) Nord Pool day-ahead electricity prices.
+It contains the full research pipeline, cleaned and aligned datasets, feature
+engineering notebooks, saved XGBoost and LightGBM model bundles, a live
+forecasting script, and automated daily forecast delivery.
 
-## Project Overview
+## Project overview
 
-This project builds XGBoost models to forecast Nordpool day-ahead electricity prices. It spans two resolutions (hourly and 15-minute) and four model versions, demonstrating the impact of feature engineering and temporal granularity on prediction accuracy.
+The codebase is organized around two linked flows:
 
-### Data Sources
-
-| Source | Location | Resolution | Columns |
-|--------|----------|-----------|---------|
-| Electricity prices | `data/originalData/electricPrices/` | 15-min (also hourly) | `timestamp`, `price` |
-| Temperature | `data/originalData/Temperature/` | 10-min raw → 15-min resampled | Helsinki-Vantaa airport |
-| Wind speed & direction | `data/originalData/WindDirection&Speed/` | 10-min raw → 15-min resampled | Oulu Vihreäsaari harbour |
-
-### Pipeline Overview
-
-```
-Raw data (10-min)  →  Resample to 15-min  →  Merge  →  Feature Engineering  →  XGBoost Model
+```text
+Raw CSVs and notebooks → cleaning/alignment → feature engineering → training → models/saved
+Live price and weather APIs → src/predict_system.py → predictions
 ```
 
-## Model Versions
+The historical pipeline builds both hourly and 15-minute datasets. The live
+predictor then uses the saved model metadata to run each model at its native
+resolution.
 
-| Version | Resolution | Features | RMSE | R² | Description |
-|---------|-----------|----------|------|-----|-------------|
-| V1      | Hourly    | Weather only (temp, wind) | 46.34 | 0.107 | Baseline — weather-only hourly model |
-| V1.5    | 15-min    | Weather only (temp, wind, direction) | 45.78 | 0.125 | 15-min baseline — weather-only |
-| V2      | Hourly    | Full engineered (lags, rolling, calendar, holiday) | 14.62 | 0.911 | Hourly with feature engineering |
-| **V2.5** | **15-min** | **Full engineered** | **8.22** | **0.972** | **Best model** |
+## What is included
 
-### Key Insight
+| Area                | Contents                                                         |
+| ------------------- | ---------------------------------------------------------------- |
+| Raw data            | Finnish spot prices, Helsinki-Vantaa temperature, Oulu wind data |
+| Cleaned data        | Hourly and 15-minute aligned CSVs in `data/convertData/`         |
+| Feature engineering | V2 hourly and V2.5 15-minute feature notebooks and outputs       |
+| Models              | Six saved bundles in `models/saved/`                             |
+| Live prediction     | `src/predict_system.py`, `src/fetch_live.py`, `src/features.py`  |
+| Tests               | Offline regression tests in `tests/`                             |
+| Automation          | Daily GitHub Actions forecast workflow                           |
 
-Feature engineering is the primary driver of accuracy, not resolution alone:
+Current saved model bundles:
 
-- **V1 → V1.5:** Increased resolution only (hourly → 15-min) with same weather features → R² 0.107 → 0.125 (negligible)
-- **V1 → V2:** Added engineered features at same hourly resolution → R² 0.107 → 0.911 (game-changer)
-- **V2 → V2.5:** Both higher resolution AND engineered features → R² 0.911 → 0.972 (best)
+- `models/saved/xgboost_v1.pkl`
+- `models/saved/xgboost_v1_5.pkl`
+- `models/saved/xgboost_v2.pkl`
+- `models/saved/xgboost_v2_5.pkl`
+- `models/saved/lightgbm_v2.pkl`
+- `models/saved/lightgbm_v2_5.pkl`
 
-## Project Structure
+## Data pipeline
 
-```
-nordpool_electricity_price_prediction/
-│
-├── data/
-│   ├── originalData/             # Raw source files
-│   │   ├── electricPrices/       # Price data (15min + hourly)
-│   │   ├── Temperature/          # Temperature CSV files + 15-min resampling notebook
-│   │   └── WindDirection&Speed/  # Wind data + 15-min resampling notebook
-│   └── convertData/              # Processed datasets and feature engineering notebooks
-│       ├── V1.5_15min_Dataset.csv       # Merged price + temp + wind (15-min, no features)
-│       ├── V1.5_15min_Dataset.ipynb     # Dataset creation notebook
-│       ├── V2.5_15min_feature_engineering.ipynb  # Feature engineering notebook
-│       ├── V2.5_15min_features.csv     # Feature-engineered 15-min data
-│       └── ... (other converted files)
-│
-├── models/                       # Training notebooks
-│   ├── modelV1.ipynb             # Hourly weather-only baseline
-│   ├── modelV1.5.ipynb           # 15-min weather-only baseline
-│   ├── modelV2.ipynb             # Hourly with engineered features
-│   └── modelV2.5.ipynb           # 15-min with engineered features (best)
-│
-├── notebooks/
-│   └── LearningNotes_CQL/        # Learning guides and project plans
-│
-├── reports/                      # Saved outputs (predictions, feature lists)
-│
-└── README.md                     # This file
-```
+The historical notebooks are grouped by stage:
 
-## Notebook Execution Order
+1. Raw price and weather exploration lives in `data/originalData/`.
+2. Weather resampling notebooks create 15-minute aligned inputs.
+3. Alignment notebooks build the model-ready datasets for V1 and V1.5.
+4. Feature engineering notebooks create V2 and V2.5 feature tables.
+5. Training notebooks in `xgboost_models/` and `lightgbm_models/` describe the
+   final model versions saved under `models/saved/`.
 
-### Hourly Pipeline
-1. `data/convertData/03_data_cleaning_and_alignment.ipynb` — Merge price + weather → `finland_electricity_predict_dataset.csv`
-2. `data/convertData/feature_engineering.ipynb` — Feature engineering → `finland_electricity_features_v2.csv`
-3. `models/modelV1.ipynb` → Train/evaluate V1
-4. `models/modelV2.ipynb` → Train/evaluate V2
+Key notebooks include:
 
-### 15-Minute Pipeline
-1. `data/originalData/Temperature/15min_Temperature.ipynb` — 10-min → 15-min temperature → `temperature_15min.csv`
-2. `data/originalData/WindDirection&Speed/15min_Wind.ipynb` — 10-min → 15-min wind (with sin/cos) → `wind_15min.csv`
-3. `data/convertData/V1.5_15min_Dataset.ipynb` — Merge price + temp + wind → `V1.5_15min_Dataset.csv`
-4. `data/convertData/V2.5_15min_feature_engineering.ipynb` — Feature engineering → `V2.5_15min_features.csv`
-5. `models/modelV1.5.ipynb` → Train/evaluate V1.5
-6. `models/modelV2.5.ipynb` → Train/evaluate V2.5
+- `data/originalData/electricPrices/price_data.ipynb`
+- `data/originalData/Temperature/15min_Temperature.ipynb`
+- `data/originalData/WindDirection&Speed/15min_Wind.ipynb`
+- `data/convertData/V1_data_cleaning_and_alignment.ipynb`
+- `data/convertData/V1.5_15min_Dataset.ipynb`
+- `data/convertData/V2_feature_engineering.ipynb`
+- `data/convertData/V2.5_15min_feature_engineering.ipynb`
+- `xgboost_models/modelV1.ipynb`
+- `xgboost_models/modelV1.5.ipynb`
+- `xgboost_models/modelV2.ipynb`
+- `xgboost_models/modelV2.5.ipynb`
+- `lightgbm_models/modelV2.ipynb`
+- `lightgbm_models/modelV2.5.ipynb`
 
-### Recommended Execution Order for Beginners
+## Live prediction
 
-To understand the learning curve, run in this order:
+`src/predict_system.py` performs the production-style forecast run:
 
-```
-V1 (hourly, weather only)  →  V2 (hourly, engineered)  →  V1.5 (15-min, weather)  →  V2.5 (15-min, engineered)
-```
+- fetches recent FI market prices and weather history
+- builds a seven-day recursive forecast at each model's native resolution
+- writes one CSV per model into `predictions/`
+- back-fills `actual_price` and `abs_error` when realized prices become available
+- replaces the current day's rows on re-run instead of duplicating them
 
-## Features
+The live fetch layer uses public sources only:
 
-All engineered features are created in `V2.5_15min_feature_engineering.ipynb` (15-min) and `feature_engineering.ipynb` (hourly):
+- FI day-ahead prices from Elering's public NPS endpoint
+- FMI observations and short-range weather
+- Open-Meteo long-range weather for the remaining forecast horizon
 
-| Category | Features | Purpose |
-|----------|----------|---------|
-| **Temporal** | `hour`, `minute`, `day_of_week`, `month`, `season`, `time_of_day` | Capture daily/weekly/seasonal patterns |
-| **Cyclic** | `hour_sin/cos`, `month_sin/cos`, `day_of_week_sin/cos` | Preserve circular continuity |
-| **Holiday** | `is_holiday`, `is_non_working` | Flag Finnish public holidays |
-| **Lag** | `price_lag_1` ... `price_lag_672` (15-min steps) | Autoregressive price history |
-| **Rolling** | `price_rolling_mean_1h/24h/7d`, `price_rolling_std_24h` | Recent trends and volatility |
-| **Weather-derived** | `HDD`, `wind_power_proxy`, `temp_lag_4/96` | Energy supply/demand proxies |
+The run fails if the long-range weather coverage is incomplete, which prevents
+quietly reusing stale weather data for the tail of the seven-day horizon.
 
-## Dependencies
+## Environment
 
-- Python 3.12+
-- pandas, numpy
-- scikit-learn
-- xgboost
-- matplotlib, seaborn
-- holidays
-- joblib
+Use the conda environment defined in `environment.yml`:
 
-Install with: `pip install pandas numpy scikit-learn xgboost matplotlib seaborn holidays joblib`
-
-## Results Summary
-
-### Comparison Table
-
-```
-Model       Resolution   Features          RMSE     R²      Improvement
-──────      ──────────   ────────          ────     ──      ───────────
-V1          Hourly       Weather only      46.34    0.107   Baseline
-V1.5        15-min       Weather only      45.78    0.125   +1.2% RMSE
-V2          Hourly       Engineered        14.62    0.911   -68.5% RMSE
-V2.5        15-min       Engineered         8.22    0.972   -82.3% RMSE vs V1
+```powershell
+conda env create -f environment.yml
+conda activate nordpool
 ```
 
-### What This Means
+The environment targets Python 3.11 and installs the pinned dependencies from
+`requirements.txt`. No API key is required for the current pipeline.
 
-- **V2.5 is production-ready** with an average error of ~3 EUR/MWh
-- **Feature engineering** (lags, rolling, calendar) is essential — without it, even more data doesn't help
-- **Higher resolution** (15-min vs hourly) adds another 44% RMSE reduction on top of engineered features
+## Run locally
 
-## Future Work
+```powershell
+python -m unittest discover -s tests -v
+python src/predict_system.py
+```
 
-- Hyperparameter tuning (grid search or Optuna) to push R² beyond 0.98
-- Time-series cross-validation for stability checks
-- SHAP feature importance analysis for interpretability
-- Real-time prediction script (`predict.py`)
-- External features: EU carbon prices, fuel costs, grid load
-- Ensemble: combine hourly + 15-min predictions
+The predictor starts from the next Helsinki delivery day. Hourly models produce
+hourly forecast rows, and 15-minute models produce 15-minute rows.
+
+## Tests
+
+The test suite focuses on the most fragile parts of the pipeline:
+
+- feature buffer behavior and rolling-window calculations
+- live price fetching and zero-price guardrails
+- forecast evaluation at the correct native resolution
+
+Run the suite with:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+## GitHub Actions
+
+The workflow in `.github/workflows/daily_forecast.yml` runs every day at 11:00
+UTC, installs dependencies, runs the offline tests, executes the predictor, and
+commits updated files under `predictions/`.
+
+It only needs the repository's standard `contents: write` permission.
+
+## Retraining notes
+
+When retraining or adding a new model, keep the saved bundle contract aligned
+with the live predictor:
+
+- `feature_cols` must match the features produced by `src/features.py`
+- `step_min` must match the model's native output resolution
+- price history must stay in chronological order; do not shuffle time series
+
+The `src/features.py` pipeline is shared by all live models. Wind direction is
+encoded with sine and cosine values rather than as a plain linear degree.
+
+## Reports
+
+Generated report artifacts, if any, should be added to `reports/` only when
+they are non-empty and ready to keep. The placeholder `report1.pdf` has already
+been removed.
