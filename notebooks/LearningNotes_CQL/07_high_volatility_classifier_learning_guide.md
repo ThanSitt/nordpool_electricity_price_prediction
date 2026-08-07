@@ -1,216 +1,217 @@
-# 07 高波动概率分类模型（High-Volatility Probability Classifier）— 零基础学习指南
+# 07 High-Volatility Probability Classifier — Zero-to-Beginner Learning Guide
 
-> 本指南对应笔记本：`data/convertData/05_feature_high_volatility.ipynb`
-> 目标读者：完全没有数学和机器学习基础的学生
-> 说明：所有中文专有名词都配上英文，方便你对照学习
-
----
-
-## 0. 这篇指南是干什么的？你要做什么？
-
-你的目标是：**训练一个小模型（classifier，分类器），让它根据"天气 + 时间"判断"未来会不会出现电价剧烈波动"，然后把这个判断结果（一个 0~1 的概率值）作为一个新的特征（feature），喂给原来的价格预测模型。**
-
-简单说，你想给原来的模型加一个"**风暴预警器**"：
-
-> 原模型：明天电价多少？（回归，regression）
-> 新模型：明天电价会不会疯涨？（分类，classification）→ 把"会不会疯涨"当成一个线索，帮助原模型预测得更准。
-
-用生活比喻：原模型像"天气预报员"（报温度），新模型像"风暴预警员"（报有没有台风）。你让预报员参考"台风预警信号"来报温度，可能会更准。
+> Corresponding notebook: `data/convertData/feature_high_volatility.ipynb`
+> Target readers: students with no background in math or machine learning
+> Note: This guide has been translated to English for your English note-taking workflow.
 
 ---
 
-## 1. 零基础核心概念（先看懂再写代码）
+## 0. What is this guide for? What are you trying to build?
 
-### 1.1 回归（Regression）vs 分类（Classification）
+Your goal is: **train a small model (a classifier) that uses "weather + time" to decide whether the electricity price will become highly volatile, then take that decision (a 0~1 probability value) and use it as a new feature for the original price-prediction model.**
 
-|                | 回归（Regression）        | 分类（Classification）              |
-| -------------- | ------------------------- | ----------------------------------- |
-| 要预测什么     | 一个**数字**（连续值）    | 一个**类别**（离散的几类）          |
-| 例子           | 明天电价 = 45.7 EUR/MWh   | 明天会不会高波动 = 是/否（1/0）     |
-| 输出           | 数字，如 45.7             | 概率，如 0.87（=87%概率是"高波动"） |
-| 你项目里已有的 | XGBoost/LightGBM 价格预测 | **本笔记本要做的**                  |
+In simple words, you want to add a "storm warning system" to the original model:
 
-> 关键区别：回归输出"多少"，分类输出"哪一类 / 多大概率是哪一类"。
+> Original model: what will tomorrow's price be? (regression)
+> New model: will tomorrow's price jump wildly? (classification) → feed "will it jump" as a clue to help the original model predict more accurately.
 
-### 1.2 什么是"标签"（Label / Target，标签/目标值）
+Analogy: the original model is like a "weather reporter" (reports temperature), the new model is like a "storm warning officer" (reports whether there is a typhoon). Letting the reporter refer to the storm-warning signal might make the temperature report more accurate.
 
-分类模型需要"标准答案"来学习。这个答案就叫**标签（label）**或**目标（target）**。
+---
 
-你的笔记本用一行代码制造了标签：
+## 1. Core Concepts From Zero (Understand Before Writing Code)
+
+### 1.1 Regression vs Classification
+
+|                       | Regression                        | Classification                                              |
+| --------------------- | --------------------------------- | ----------------------------------------------------------- |
+| What it predicts      | a **number** (continuous value)   | a **category** (a few discrete groups)                      |
+| Example               | tomorrow's price = 45.7 EUR/MWh   | high volatility or not = yes/no (1/0)                       |
+| Output                | a number, e.g. 45.7               | a probability, e.g. 0.87 (=87% chance of "high volatility") |
+| What you already have | XGBoost/LightGBM price prediction | **what this notebook builds**                               |
+
+> Key difference: regression outputs "how much", classification outputs "which category / how likely that category is".
+
+### 1.2 What is a Label / Target?
+
+A classification model needs a "correct answer" to learn from. That answer is called the **label** or **target**.
+
+Your notebook creates the label with one line:
 
 ```python
 df['is_high_volatility'] = (df['price_roll_std_6h'] >= vol_threshold).astype(int)
 ```
 
-意思是：把"过去 6 小时价格波动（标准差，standard deviation）"和某个警戒线（threshold，阈值）比较：
+This compares "the price volatility over the past 6 hours (standard deviation)" with a warning line (threshold):
 
-- 波动 ≥ 警戒线 → 标签 = 1（高波动，疯涨/暴跌时刻）
-- 波动 < 警戒线 → 标签 = 0（平稳）
+- volatility >= threshold -> label = 1 (high volatility, wild up/down moment)
+- volatility < threshold -> label = 0 (stable)
 
-这就把"价格波动"这件事，变成了一列 0/1 的答案，分类模型才好学习。
+This turns "price volatility" into a column of 0/1 answers, so the classifier can learn from it.
 
-### 1.3 什么是"特征"（Feature，特征）
+### 1.3 What is a Feature?
 
-特征是**喂给模型看的"线索"**。分类模型只能看到这些线索，然后猜标签。
+Features are the "clues" you feed the model. The classifier only sees these clues and then guesses the label.
 
-你的笔记本选的特征（修正后）：
+The features your notebook picks (corrected):
 
 ```python
 vol_features = ['temp', 'wind_speed', 'day_of_week', 'hour', 'month']
 ```
 
-- 温度（temp）
-- 风速（wind_speed）
-- 星期几（day_of_week）
-- 几点（hour）
-- 月份（month）
+- temperature (temp)
+- wind speed (wind_speed)
+- day of week (day_of_week)
+- hour of day (hour)
+- month (month)
 
-> 直觉：极端天气（很冷、大风）常常导致电价大波动；周末/深夜通常平稳。所以这些"线索"确实和"波动"有关系。
+> Intuition: extreme weather (very cold, strong wind) often causes big price swings; weekends / late night are usually calm. So these clues do relate to volatility.
 
-### 1.4 什么是"阈值"（Threshold，阈值/警戒线）
+### 1.4 What is a Threshold?
 
-阈值就是"一条分界线"。你的笔记本用：
+A threshold is a "dividing line". Your notebook uses:
 
 ```python
 vol_threshold = df['price_roll_std_6h'].quantile(0.85)
 ```
 
-`quantile(0.85)` = **85% 分位数**（85th percentile）。意思是：把所有时刻的波动值排序，取"第 85% 的位置"当分界线。
+`quantile(0.85)` = the **85th percentile**. It sorts all volatility values and takes the value at the 85% position as the dividing line.
 
-- 也就是说：**波动最大的那 15% 时刻 = 高波动（标签1）**，剩下 85% = 平稳（标签0）。
+- In other words: the **top 15% most volatile moments = high volatility (label 1)**, the rest 85% = stable (label 0).
 
-> 为什么用 85% 分位数？因为"高波动"本来就是相对概念，用电价历史自己的分布来定界线，比拍脑袋定一个数更合理。
+> Why the 85th percentile? Because "high volatility" is a relative concept; setting the line from the price history's own distribution is more reasonable than guessing a number.
 
-### 1.5 什么是"概率"（Probability）和 predict_proba（概率）
+### 1.5 What is Probability and predict_proba?
 
-这是整个笔记本**最精髓**的地方。
+This is the most valuable part of the whole notebook.
 
-普通的 `model.predict()` 会直接告诉你"是 1 还是 0"。
-但 `model.predict_proba()` 会给一个**柔和的概率**（0~1 之间的数）：
+Normal `model.predict()` directly tells you "1 or 0".
+But `model.predict_proba()` gives a **soft probability** (a number between 0 and 1):
 
 ```python
 risk_model.predict_proba(X_vol)[:, 1]
 ```
 
-- 返回两列：`[:, 0]` = "是平稳"的概率，`[:, 1]` = "是高波动"的概率
-- 比如返回 `0.87`，意思就是"**87% 的把握这会是高波动时刻**"
+- It returns two columns: `[:, 0]` = probability of "stable", `[:, 1]` = probability of "high volatility"
+- For example, returning `0.87` means "**87% sure this is a high-volatility moment**"
 
-> 为什么用概率而不是 0/1？因为 0.87 和 0.55 的"危险程度"完全不同，概率保留了这种**细腻程度（granularity）**，作为新特征更有信息量。
+> Why use probability instead of 0/1? Because 0.87 and 0.55 have completely different "danger levels". Probability keeps this fine-grained detail (granularity), so it carries more information as a new feature.
 
-### 1.6 什么是训练集/测试集（Training Set / Test Set）
+### 1.6 What is a Training Set / Test Set?
 
-- **训练集（training set）**：给模型做作业用的（教它规律）
-- **测试集（test set）**：闭卷考试用的（考它学得怎么样）
+- **Training set**: the data used to teach the model (homework)
+- **Test set**: the data used to check the model (closed-book exam)
 
-你的笔记本用了：
+Your notebook uses:
 
 ```python
 train_test_split(X_vol, y_vol, test_size=0.2, shuffle=False)
 ```
 
-- `test_size=0.2`：20% 当考试题
-- `shuffle=False`：**不打乱**，因为时间序列必须按时间顺序，未来不能泄漏到过去（这是铁律！）
+- `test_size=0.2`: 20% is the exam
+- `shuffle=False`: **do not shuffle**, because time-series data must stay in time order — the future must not leak into the past (this is a hard rule!)
 
-### 1.7 核心直觉：为什么能用"天气"预测"价格波动"？
+### 1.7 Core Intuition: Why can "weather" predict "price volatility"?
 
-你可能想问：**天气又不是价格，凭什么天气能预测价格波动？**
+You might ask: **weather is not price, so why can weather predict price volatility?**
 
-答案：**因果关系**。电价剧烈波动往往由**突发供需变化**引起，而天气是主要推手：
+Answer: **causality**. Sharp electricity-price swings are usually caused by **sudden supply/demand changes**, and weather is a major driver:
 
-- 温度骤降 → 取暖需求暴增 → 价格飙涨
-- 大风突然来袭/停歇 → 风电出力剧变 → 价格波动
-- 极端天气影响水电站、输电线路
+- sudden temperature drop -> heating demand surges -> price jumps
+- wind suddenly arrives/stops -> wind-power output changes sharply -> price swings
+- extreme weather affects hydro plants and transmission lines
 
-所以"天气 + 时间"里藏着"会不会高波动"的信号。分类模型就是去**自动发现**这些信号（而不是我们人肉总结）。
-
----
-
-## 2. 你的笔记本在干什么（3 个单元格逐个讲）
-
-### 单元格 1：制造标签（Labeling，打标签）
-
-```
-读取 V2.5 宽表 → 按时间排序 → 用价格算6小时滚动标准差 → 删掉头部NaN
-→ 用85%分位数当阈值 → 生成0/1标签
-```
-
-做的事情：把"连续的价格波动"变成"0/1 的判断题答案"。
-
-### 单元格 2：训练风险分类器（Training the classifier）
-
-```
-选天气+时间特征 → 80/20按时间切分 → XGBClassifier训练
-→ predict_proba算出概率 → 写回表格新列 high_volatility_prob
-```
-
-做的事情：教一个"风暴预警器"，并让它在每个时刻输出"高波动概率"。
-
-### 单元格 3：保存（Saving）
-
-```
-把带新特征的表另存为 V3.0_15min_Risk_Enhanced_Dataset.csv
-```
-
-做的事情：生成一份"增强版"数据表，供价格模型重训使用。
+So "weather + time" contains signals about "will it be highly volatile". The classifier's job is to **discover these signals automatically** (instead of us summarizing them by hand).
 
 ---
 
-## 3. ⚠️ 重要：你的代码里有"列名和路径错误"（我帮你逐项查过了）
+## 2. What Your Notebook Does (Cell by Cell)
 
-### 3.1 特征列名不匹配（会直接报错 KeyError）
+### Cell 1: Labeling (creating the target)
 
-| 你笔记本里用的名字             | 数据表里**真实存在**的名字    | 说明                             |
-| ------------------------------ | ----------------------------- | -------------------------------- |
-| `air_temp_mean`                | `temp`                        | 温度列                           |
-| `wind_speed_mean`              | `wind_speed`                  | 风速列                           |
-| `wind_lag_24h`                 | ❌ 不存在                     | 没有"24小时前风速"这一列         |
-| `temp_lag_24h`                 | `temp_lag_4` 或 `temp_lag_96` | 只有 1小时前/24小时前(用96) 两种 |
-| `dayofweek`                    | `day_of_week`                 | 注意下划线写法                   |
-| `price_roll_std_24h`（检查用） | `price_rolling_std_24h`       | 多了 "ing"，且那是24小时窗口     |
+```
+read V2.5 wide table -> sort by time -> compute 6h rolling std of price -> drop leading NaN
+-> use the 85th percentile as threshold -> create 0/1 label
+```
 
-> 📌 学习要点：**写代码前，永远先用 `df.columns.tolist()` 打印表头确认列名**。这是初学者最容易踩的坑，也是最应该养成的好习惯。
+What it does: turns the continuous "price volatility" into a 0/1 yes/no answer.
 
-### 3.2 路径错误（相对路径（relative path）指向错误）
+### Cell 2: Training the Risk Classifier
 
-你的笔记本**住在 `data/convertData/` 文件夹里**，所以：
+```
+pick weather + time features -> 80/20 chronological split -> train XGBClassifier
+-> compute probabilities with predict_proba -> write back a new column high_volatility_prob
+```
 
-- 读取 `'../data/convertData/V2.5_15min_features.csv'` 会变成 `data/data/...` ❌
-- 保存 `'../data/convertData/V3.0...csv'` 也会变成 `data/data/...` ❌
+What it does: trains a "storm warning system" and makes it output a "high-volatility probability" at every moment.
 
-**修正**：因为你就在 `data/convertData/` 里，直接用文件名即可：
+### Cell 3: Saving
+
+```
+save the table with the new feature as V2.5.1_15min_Risk_Enhanced_Dataset.csv
+```
+
+What it does: creates an "enhanced" dataset for the price model to retrain on.
+
+---
+
+## 3. Important: Your Code Had "Column Name and Path Errors" (I Checked Them One by One)
+
+### 3.1 Feature Column Name Mismatches (would raise a KeyError)
+
+| Name used in your notebook   | Name that actually exists     | Note                                       |
+| ---------------------------- | ----------------------------- | ------------------------------------------ |
+| `air_temp_mean`              | `temp`                        | temperature column                         |
+| `wind_speed_mean`            | `wind_speed`                  | wind speed column                          |
+| `wind_lag_24h`               | does not exist                | there is no "wind 24h ago" column          |
+| `temp_lag_24h`               | `temp_lag_4` or `temp_lag_96` | only "1h ago" / "24h ago (use 96)"         |
+| `dayofweek`                  | `day_of_week`                 | mind the underscore                        |
+| `price_roll_std_24h` (check) | `price_rolling_std_24h`       | missing "ing"; also that is the 24h window |
+
+> Learning point: before writing code, ALWAYS print the header with `df.columns.tolist()` to confirm the column names. This is the most common beginner trap and the best habit to build.
+
+### 3.2 Path Errors (Relative Path Points to the Wrong Place)
+
+Your notebook lives inside the `data/convertData/` folder, so:
+
+- reading `'../data/convertData/V2.5_15min_features.csv'` becomes `data/data/...` (wrong)
+- saving `'../data/convertData/V3.0...csv'` also becomes `data/data/...` (wrong)
+
+**Fix**: because you are already inside `data/convertData/`, just use the file name directly:
 
 ```python
-df = pd.read_csv('V2.5_15min_features.csv')          # 同一文件夹
-df.to_csv('V3.0_15min_Risk_Enhanced_Dataset.csv')    # 同一文件夹
+df = pd.read_csv('V2.5_15min_features.csv')          # same folder
+df.to_csv('V2.5.1_15min_Risk_Enhanced_Dataset.csv')  # same folder
 ```
 
-> 📌 学习要点：**相对路径是从"当前文件所在文件夹"出发的**。搞清楚你的笔记本放在哪一层，再决定 `../` 要用几个。
+> Learning point: a relative path is resolved from the folder where the current file lives. Know which folder your notebook is in, then decide how many `../` you need.
 
 ---
 
-## 4. 修正后的完整代码（可以直接用）
+## 4. Corrected Full Code (Ready to Use)
 
-把下面的单元格替换进你的笔记本（路径和列名都已修正，并新增了"评估分类器"一步）：
+Replace the cells below into your notebook (paths and column names are fixed, and a "classifier evaluation" step was added):
 
-### 单元格 1 — 制造标签（Labeling）
+### Cell 1 — Labeling
 
 ```python
 import pandas as pd
 import numpy as np
 
 print("1. Loading V2.5 15-Minute Dataset...")
-# 修正①：路径 —— 笔记本在 data/convertData 里，直接写文件名
+# Fix 1: path - the notebook is inside data/convertData, so use the file name directly
 df = pd.read_csv('V2.5_15min_features.csv')
 
-df['datetime'] = pd.to_datetime(df['datetime'])
+# convert datetime to UTC, then to Helsinki time (fixes the mixed-timezone error)
+df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert('Europe/Helsinki')
 df = df.sort_values('datetime').reset_index(drop=True)
 
 print("2. Defining 'High Volatility' Threshold...")
-# 用真实价格算 6 小时滚动标准差（波动率），15分钟粒度 → 24 行一个窗口
-# 注意：直接新算一列，不依赖表里已有的 price_rolling_std_24h（那个是24小时窗口）
+# compute the 6h rolling std of price (volatility); 15-min granularity -> window of 24 rows
+# note: create a fresh column instead of reusing price_rolling_std_24h (that one is a 24h window)
 df['price_roll_std_6h'] = df['price'].rolling(window=24).std()
 
-# 删掉滚动窗口开头的 NaN 缺失值
+# drop the leading NaN rows created by the rolling window
 df = df.dropna(subset=['price_roll_std_6h']).copy()
 
 vol_threshold = df['price_roll_std_6h'].quantile(0.85)
@@ -221,7 +222,7 @@ df['is_high_volatility'] = (df['price_roll_std_6h'] >= vol_threshold).astype(int
 print(df['is_high_volatility'].value_counts(normalize=True) * 100)
 ```
 
-### 单元格 2 — 训练风险分类器（修正列名 + 新增评估）
+### Cell 2 — Training the Risk Classifier (fixed columns + added evaluation)
 
 ```python
 from xgboost import XGBClassifier
@@ -229,15 +230,15 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 
 print("4. Selecting Safe Features for the Classifier...")
-# 修正②：列名全部改成数据表里真实存在的名字
-# temp_lag_4 = 1小时前的温度（15分钟×4=1小时）
+# Fix 2: use column names that actually exist in the dataset
+# temp_lag_4 = temperature 1 hour ago (15 min * 4 = 1 hour)
 vol_features = ['temp', 'wind_speed', 'wind_direction_deg', 'temp_lag_4',
                 'hour', 'day_of_week', 'month']
 
 X_vol = df[vol_features]
 y_vol = df['is_high_volatility']
 
-# 保险：再删一次特征里的 NaN（XGB 其实能容忍，但干净点好）
+# safety: drop rows with NaN in the features (XGB can tolerate them, but cleaner is better)
 mask = X_vol.notna().all(axis=1)
 X_vol, y_vol = X_vol[mask], y_vol[mask]
 
@@ -247,11 +248,11 @@ X_vol_train, X_vol_test, y_vol_train, y_vol_test = train_test_split(
 
 print("5. Initializing and Training the XGBoost Risk Classifier...")
 risk_model = XGBClassifier(
-    n_estimators=100,       # 100棵警戒树
-    learning_rate=0.05,     # 学慢一点，稳一点
-    max_depth=5,            # 深度5，防止死记硬背（过拟合）
-    objective='binary:logistic',  # 明确告诉它：这是二分类任务
-    random_state=42         # 锁死随机种子，结果可复现
+    n_estimators=100,       # 100 warning trees
+    learning_rate=0.05,     # learn slowly and steadily
+    max_depth=5,            # depth 5, prevents memorizing (overfitting)
+    objective='binary:logistic',  # explicitly tell it this is a binary classification task
+    random_state=42         # lock the random seed so results are reproducible
 )
 risk_model.fit(X_vol_train, y_vol_train)
 
@@ -261,143 +262,144 @@ print('Test accuracy:', round(accuracy_score(y_vol_test, y_pred), 4))
 print(classification_report(y_vol_test, y_pred))
 
 print("7. Extracting the High-Volatility Probabilities...")
-# predict_proba 返回 [平稳概率, 高波动概率]，取第二列 [:, 1]
-predicted_probabilities = risk_model.predict_proba(X_vol)[:, 1]
-df['high_volatility_prob'] = predicted_probabilities
+# predict_proba returns [safe probability, high-volatility probability]; take the second column [:, 1]
+# Fix 3: X_vol may be shorter than df (NaN rows removed), so use a Series aligned by index
+proba = pd.Series(risk_model.predict_proba(X_vol)[:, 1], index=X_vol.index)
+df['high_volatility_prob'] = proba
 
 print("   -> New feature 'high_volatility_prob' created!")
 df[['datetime', 'price', 'is_high_volatility', 'high_volatility_prob']].tail(10)
 ```
 
-### 单元格 3 — 保存增强版数据表（修正路径）
+### Cell 3 — Saving the Enhanced Dataset (fixed path)
 
 ```python
-print("8. Saving the new V3 Matrix (V2.5 + Risk Feature)...")
-# 修正③：路径 —— 直接保存到当前文件夹
-save_path = 'V3.0_15min_Risk_Enhanced_Dataset.csv'
+print("8. Saving the new Matrix (V2.5 + Risk Feature)...")
+# Fix 4: path - save directly to the current folder
+save_path = 'V2.5.1_15min_Risk_Enhanced_Dataset.csv'
 df.to_csv(save_path, index=False)
 print(f"Matrix saved to: {save_path}")
 ```
 
 ---
 
-## 5. 这个新特征怎么用进价格模型（V3）？
+## 5. How to Use This New Feature in the Price Model (V3)?
 
-新特征 `high_volatility_prob` 造出来后，要让价格模型用上它，需要**三步**：
+Once `high_volatility_prob` is created, making the price model use it takes **three steps**:
 
 ```
-步骤1：本笔记本 → 生成 V3.0_15min_Risk_Enhanced_Dataset.csv（已含新特征）
-步骤2：在 V3 对比笔记本里，训练价格模型时把新列加进特征
-       比如：df.drop(columns=['price','datetime']) 后，模型会自动看到新列
-步骤3：⚠️ 必须同步修改 src/features.py（见第6节）
+Step 1: this notebook -> generate V2.5.1_15min_Risk_Enhanced_Dataset.csv (already contains the new feature)
+Step 2: in the V3 comparison notebook, include the new column when training the price model
+        e.g. after df.drop(columns=['price','datetime']), the model will automatically see the new column
+Step 3: WARNING: you must also update src/features.py (see section 6)
 ```
 
-在 V3 对比笔记本里，你只需要：
+In the V3 comparison notebook, you only need:
 
 ```python
-df = pd.read_csv('../data/convertData/V3.0_15min_Risk_Enhanced_Dataset.csv')
+df = pd.read_csv('../data/convertData/V2.5.1_15min_Risk_Enhanced_Dataset.csv')
 X = df.drop(columns=['price', 'datetime', 'is_high_volatility', 'price_roll_std_6h'])
 ```
 
-> 注意：`is_high_volatility`（0/1标签）和 `price_roll_std_6h`（波动值）**不能**当特征喂给价格模型——它们本身就是"从价格算出来的答案"，会泄漏真实信息（数据泄漏，data leakage）。**只有 `high_volatility_prob`（天气推断出的概率）才能当特征。**
+> Note: `is_high_volatility` (the 0/1 label) and `price_roll_std_6h` (the volatility value) **cannot** be used as features for the price model — they are "answers derived from price" and would leak real information (data leakage). **Only `high_volatility_prob` (a probability inferred from weather) can be a feature.**
 
 ---
 
-## 6. 几个必须知道的"坑"（Caveats，注意事项）
+## 6. Pitfalls You Must Know (Caveats)
 
-### 6.1 全局阈值 = 轻微数据泄漏（Slight Data Leakage）
+### 6.1 Global Threshold = Slight Data Leakage
 
-`vol_threshold = quantile(0.85)` 是用**整张表（包括测试期）**算的。这等于阈值"偷看了未来"。
+`vol_threshold = quantile(0.85)` is computed over the **whole table (including the test period)**. That means the threshold "peeked at the future".
 
-- 影响：轻微，因为阈值只是一个全局分界线
-- 改进（进阶做法）：只在**训练部分**算阈值：
+- Impact: slight, because the threshold is only a global dividing line
+- Improvement (advanced): compute the threshold only on the training part:
   ```python
   train_part = df.iloc[:int(len(df)*0.8)]
   vol_threshold = train_part['price_roll_std_6h'].quantile(0.85)
   ```
 
-### 6.2 类别不平衡（Class Imbalance，类别不平衡）
+### 6.2 Class Imbalance
 
-你的标签是 85% 平稳 / 15% 高波动——**不均衡**。
+Your label is 85% stable / 15% high volatility — **imbalanced**.
 
-- 后果：模型可能"偷懒"，全都猜 0，准确率照样 85%
-- 所以：**别只看准确率（accuracy）**，要看 `precision`（精确率）、`recall`（召回率）。我用 `classification_report` 帮你打印了这些指标。
-- 改进：`XGBClassifier(scale_pos_weight=...)` 可以惩罚"偷懒"。
+- Consequence: the model may be "lazy" and predict 0 for everything, and accuracy is still 85%
+- So: **do not only look at accuracy**; look at `precision` and `recall`. The `classification_report` prints these for you.
+- Improvement: `XGBClassifier(scale_pos_weight=...)` can penalize the "lazy" behavior.
 
-### 6.3 滚动窗口（Rolling Window）包含当前值吗？
+### 6.3 Does the Rolling Window Include the Current Value?
 
-`df['price'].rolling(24).std()` 用的是**从当前时刻往前数 24 个**（含当前）。
+`df['price'].rolling(24).std()` uses the **previous 24 values including the current one**.
 
-- 对你的**标签**来说：没问题（我们就是想标记"当前这一刻"的波动）
-- 但注意：表里原有的 `price_rolling_std_1h` 是 `shift(1)` 之后再 rolling（**不含当前**），两种语义不同，别混用
+- For your **label**: that is fine (we want to mark the volatility of "this current moment")
+- But note: the existing `price_rolling_std_1h` in the table is computed with `shift(1)` before rolling (it **excludes** the current value). The two semantics are different; do not mix them.
 
-### 6.4 ⚠️ 最关键的坑：实时预测（Live Prediction）怎么得到这个特征？
+### 6.4 WARNING - The Most Important Pitfall: How to Get This Feature in Live Prediction?
 
-这是整个项目里最重要的一个约束，也是 README 反复强调的：
+This is the most important constraint in the whole project, and it is what the README keeps stressing:
 
-> **训练时造的特征，必须在实时预测时能一模一样地算出来。**
+> **Any feature built during training must be computable in exactly the same way during live prediction.**
 
-好消息是：你的设计很巧妙——分类器的输入只有**天气和时间**，而未来 7 天的天气（天气预报）和时间（日历）都是**提前可知的**。所以未来每个时间点的 `high_volatility_prob` 都能算出来，可以用于实时预测。✅
+Good news: your design is clever — the classifier only takes **weather and time** as input, and the next 7 days of weather (forecast) and time (calendar) are **known in advance**. So `high_volatility_prob` can be computed for every future moment and used for live prediction.
 
-但坏消息是：**目前 `src/features.py` 里没有这个逻辑**。如果你只改了训练数据、不改 `src/features.py`，就会造成"训练和预测特征不一致"——预测结果会错。所以：
+Bad news: **`src/features.py` does not contain this logic yet**. If you only change the training data but not `src/features.py`, training and prediction features will be inconsistent — the predictions will be wrong. So:
 
-- 进阶任务：把 `high_volatility_prob` 的计算也写进 `src/features.py`，并在 `src/predict_system.py` 里加载 `risk_model`
-- 这是"让特征真正上线"的关键一步（你现在可以先不写，但要**知道**这件事）
+- Advanced task: also write the `high_volatility_prob` computation into `src/features.py`, and load `risk_model` in `src/predict_system.py`
+- This is the key step to make the feature "go live" (you can postpone it for now, but you must **know** about it)
 
-### 6.5 分类器本身怎么评价才算"好"？
+### 6.5 How to Judge Whether the Classifier Itself Is "Good"?
 
-- 好分类器：高波动时刻的 `high_volatility_prob` 明显比平稳时刻高
-- 你可以画图验证：
+- A good classifier: `high_volatility_prob` is clearly higher for high-volatility moments than for stable moments
+- You can verify visually:
   ```python
   import matplotlib.pyplot as plt
   high = df[df['is_high_volatility']==1]['high_volatility_prob']
   low  = df[df['is_high_volatility']==0]['high_volatility_prob']
-  plt.hist([low, high], label=['平稳', '高波动'], bins=30, alpha=0.6)
+  plt.hist([low, high], label=['Stable', 'High volatility'], bins=30, alpha=0.6)
   plt.legend(); plt.show()
   ```
-  如果两个直方图分得开，说明这个特征有用；如果完全重叠，说明这个特征没信息量。
+  If the two histograms separate, the feature is useful; if they completely overlap, the feature carries no information.
 
 ---
 
-## 7. 学习路径：接下来学什么
+## 7. Learning Path: What to Learn Next
 
-| 阶段            | 内容                                                 | 优先级 |
-| --------------- | ---------------------------------------------------- | ------ |
-| 1️⃣ 先跑通       | 用修正后的代码把 3 个单元格跑起来                    | 必须   |
-| 2️⃣ 看懂         | 回答：标签怎么来的？predict_proba 返回什么？         | 必须   |
-| 3️⃣ 验证         | 跑第 6.5 节的直方图，看特征有没有用                  | 重要   |
-| 4️⃣ 集成         | 把新特征加进 V3 价格模型重训，对比有没有变准         | 重要   |
-| 5️⃣ 上线（进阶） | 把逻辑镜像进 `src/features.py` + `predict_system.py` | 进阶   |
-| 6️⃣ 优化（进阶） | 修数据泄漏、处理类别不平衡、试更多特征               | 进阶   |
-
----
-
-## 8. 术语表（Glossary 中英对照）
-
-| 中文            | English               | 一句话解释                             |
-| --------------- | --------------------- | -------------------------------------- |
-| 分类            | Classification        | 预测"是哪一类"，而不是"是多少"         |
-| 二分类          | Binary Classification | 只有两个类（0/1，如 平稳/高波动）      |
-| 回归            | Regression            | 预测一个连续数字（如电价 45.7）        |
-| 标签 / 目标     | Label / Target        | 模型要学的"标准答案"                   |
-| 特征            | Feature               | 喂给模型的"线索"（天气、时间）         |
-| 阈值 / 警戒线   | Threshold             | 判断"算不算高波动"的分界线             |
-| 分位数          | Percentile / Quantile | 把数据排序后取某个百分比位置的值       |
-| 标准差          | Standard Deviation    | 衡量数据"波动/离散"程度                |
-| 滚动窗口        | Rolling Window        | 滑动地看过去 N 个时间点                |
-| 概率            | Probability           | 0~1 之间的"把握程度"                   |
-| 预测概率        | predict_proba         | 输出概率而不是硬分类结果               |
-| 训练集 / 测试集 | Training / Test Set   | 做作业的数据 / 考试的数据              |
-| 准确率          | Accuracy              | 猜对的占比                             |
-| 精确率          | Precision             | 猜成"高波动"里，真的高波动的比例       |
-| 召回率          | Recall                | 真正的高波动里，被找出来的比例         |
-| 类别不平衡      | Class Imbalance       | 两类样本数量悬殊                       |
-| 数据泄漏        | Data Leakage          | 模型偷看了不该看的"未来/答案"信息      |
-| 过拟合          | Overfitting           | 死记硬背训练题，换新题就垮             |
-| 随机种子        | Random Seed           | 锁死随机，让结果可复现                 |
-| 相对路径        | Relative Path         | 从当前文件位置出发找文件               |
-| 无监督/有监督   | Supervised Learning   | 有标准答案的学习方式（本项目是有监督） |
+| Stage                  | Content                                                                         | Priority  |
+| ---------------------- | ------------------------------------------------------------------------------- | --------- |
+| 1. Get it running      | run the 3 cells with the corrected code                                         | must      |
+| 2. Understand          | answer: how is the label created? what does predict_proba return?               | must      |
+| 3. Verify              | run the histogram in 6.5 and check whether the feature helps                    | important |
+| 4. Integrate           | add the new feature to the V3 price model, retrain, compare whether it improved | important |
+| 5. Go live (advanced)  | mirror the logic into `src/features.py` + `src/predict_system.py`               | advanced  |
+| 6. Optimize (advanced) | fix the data leakage, handle class imbalance, try more features                 | advanced  |
 
 ---
 
-_本指南由项目背景 + 你的笔记本内容整理而成。核心一句话：先用 85% 分位数把波动变成 0/1 标签，再用天气+时间训练一个分类器输出"高波动概率"，把这个概率当成新特征，喂给价格预测模型。_
+## 8. Glossary (English)
+
+| English               | One-line explanation                                                |
+| --------------------- | ------------------------------------------------------------------- |
+| Classification        | predict "which category", not "how much"                            |
+| Binary Classification | only two classes (0/1, e.g. stable / high volatility)               |
+| Regression            | predict a continuous number (e.g. price 45.7)                       |
+| Label / Target        | the "correct answer" the model learns from                          |
+| Feature               | the "clue" fed to the model (weather, time)                         |
+| Threshold             | the dividing line for deciding "is it high volatility"              |
+| Percentile / Quantile | the value at a certain percentage position after sorting the data   |
+| Standard Deviation    | how much the data fluctuates / disperses                            |
+| Rolling Window        | slide over the past N time points                                   |
+| Probability           | a 0~1 "degree of confidence"                                        |
+| predict_proba         | output probabilities instead of a hard class                        |
+| Training / Test Set   | homework data / exam data                                           |
+| Accuracy              | the fraction of correct guesses                                     |
+| Precision             | of the moments predicted "high volatility", how many really are     |
+| Recall                | of the truly high-volatility moments, how many were found           |
+| Class Imbalance       | the two classes have very different numbers of samples              |
+| Data Leakage          | the model peeked at information it should not have (future/answers) |
+| Overfitting           | memorizing the training questions and failing on new ones           |
+| Random Seed           | lock the randomness so results are reproducible                     |
+| Relative Path         | find a file starting from the current file's location               |
+| Supervised Learning   | learning with a correct answer (this project is supervised)         |
+
+---
+
+_This guide was written from the project background + your notebook content. Core idea in one sentence: first turn volatility into a 0/1 label with the 85th percentile, then train a classifier on weather + time to output a "high-volatility probability", and feed that probability as a new feature to the price-prediction model._

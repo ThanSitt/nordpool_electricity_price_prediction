@@ -1,158 +1,158 @@
-# 08 从"训练模型"到"自动预测"：完整认知转换指南
+# 08 From "Training a Model" to "Automated Prediction": A Complete Mental-Model Shift
 
-> 对应你的问题："我训练完了 XGBoost V2，然后呢？怎么变成 GitHub Actions 自动预测的？"
-> 目标读者：只做过训练、还没理解"预测"和"部署"的初学者
-> 所有中文专有名词都配英文
+> Corresponds to your question: "I finished training XGBoost V2, now what? How does it become a GitHub Actions auto-prediction?"
+> Target readers: beginners who have only trained models and have not yet understood "prediction" and "deployment"
+> Note: This guide has been translated to English for your English note-taking workflow.
 
 ---
 
-## 0. 先给你一张"全局地图"（最重要！先看这个）
+## 0. Here Is a "Global Map" First (Most Important! Read This First)
 
 ```
-┌──────────── 你熟悉的世界：训练（Training）────────────┐
-│                                                       │
-│  数据 → 特征 → XGBoost 训练 → 得到"模型"              │
-│  （notebook 里做的事）          ↓                      │
-│                          model.pkl（模型文件）        │
-└───────────────────────────────────────────────────────┘
-                        ↓ 进入"部署"（Deployment）世界
-┌──────────── 你还不熟的世界：预测 + 自动化 ─────────────┐
-│                                                       │
-│  GitHub Actions（.yml）每天定时喊：                    │
-│      python src/predict_system.py                     │
-│        ↓ 读取所有 model.pkl                           │
-│        ↓ 拿最新天气/电价 → 造特征 → 预测7天            │
-│        ↓ 生成 predictions/*.csv                       │
-│        ↓ git commit（forecast: 日期 daily update）     │
-└───────────────────────────────────────────────────────┘
+┌──────────── The world you know: Training ────────────┐
+│                                                      │
+│  data -> features -> XGBoost training -> a "model"   │
+│  (what happens in the notebook)         ↓            │
+│                                  model.pkl (model file) │
+└──────────────────────────────────────────────────────┘
+                       ↓ enter the "Deployment" world
+┌──────────── The world you do not know yet: Prediction + Automation ─┐
+│                                                                     │
+│  GitHub Actions (.yml) calls daily on schedule:                     │
+│      python src/predict_system.py                                   │
+│        ↓ read all model.pkl                                        │
+│        ↓ fetch latest weather/price -> build features -> predict 7 days │
+│        ↓ generate predictions/*.csv                                │
+│        ↓ git commit (forecast: date daily update)                  │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-**核心一句话**：训练产生"模型文件（.pkl）"，预测程序"使用"这个模型文件去算未来；GitHub Actions 只是每天自动喊预测程序起床。**模型不是 CSV，也不是 notebook。**
+**Core idea in one sentence**: training produces a "model file (.pkl)"; the prediction program "uses" that model file to compute the future; GitHub Actions just wakes the prediction program up every day. **The model is NOT a CSV, and NOT a notebook.**
 
 ---
 
-## 1. .yml 是什么？（你的问题 1、2、3）
+## 1. What Is .yml? (Your Questions 1, 2, 3)
 
-### 1.1 .yml 是程序吗？是 Python 吗？
+### 1.1 Is .yml a program? Is it Python?
 
-**不是程序，也不是 Python。** `.yml`（也叫 `.yaml`）是一种**配置文件格式**（config file format），就像 JSON、TOML 一样，用来**描述"一些设定"**，而不是"执行逻辑"。
+**It is not a program, and not Python.** `.yml` (also written `.yaml`) is a **config file format**, just like JSON or TOML, used to **describe "some settings"**, not to "execute logic".
 
-| 对比          | 编程语言（Python）        | 配置格式（YAML）               |
-| ------------- | ------------------------- | ------------------------------ |
-| 干什么        | 写"怎么算"的逻辑          | 写"有哪些设定/步骤"的描述      |
-| 例子          | `for i in range(10): ...` | `schedule: cron: '0 11 * * *'` |
-| 有没有 if/for | 有                        | 没有（只是数据）               |
-| 结尾          | `.py`                     | `.yml` / `.yaml`               |
+| Comparison   | Programming language (Python) | Config format (YAML)                    |
+| ------------ | ----------------------------- | --------------------------------------- |
+| what it does | write "how to compute" logic  | write a description of "settings/steps" |
+| example      | `for i in range(10): ...`     | `schedule: cron: '0 11 * * *'`          |
+| has if/for?  | yes                           | no (it is only data)                    |
+| extension    | `.py`                         | `.yml` / `.yaml`                        |
 
-YAML 全称是 "**YAML Ain't Markup Language**"（YAML 不是标记语言）——一个递归缩写，意思是"我就是个简单的人类可读格式"。
+YAML stands for "**YAML Ain't Markup Language**" — a recursive acronym meaning "I am just a simple human-readable format".
 
-### 1.2 为什么用 .yml 结尾？
+### 1.2 Why does it end in .yml?
 
-`.yml` 是 YAML 格式文件的后缀名（`.yaml` 是另一种常见写法，两者一样）。用它能告诉"编辑器/工具"：请按 YAML 语法高亮和检查这个文件。
+`.yml` is the file extension of the YAML format (`.yaml` is another common spelling; they are the same). It tells "editors/tools": please highlight and validate this file as YAML syntax.
 
-### 1.3 这是 GitHub 专属格式吗？
+### 1.3 Is this a GitHub-only format?
 
-**YAML 本身不是 GitHub 专属**——很多工具都用 YAML 写配置，比如：
+**YAML itself is not GitHub-only** — many tools use YAML for config, for example:
 
-- Docker（`docker-compose.yml`）
-- Kubernetes（k8s）
-- Ansible（自动化运维）
-- **你自己的项目也有！`environment.yml` 就是 YAML 格式！**
+- Docker (`docker-compose.yml`)
+- Kubernetes (k8s)
+- Ansible (automation)
+- **Your own project too! `environment.yml` is YAML format!**
 
-但 **`.github/workflows/*.yml` 这种"工作流文件"是 GitHub Actions 专属的约定**：GitHub 会在你仓库的 `.github/workflows/` 文件夹里找 YAML 文件，按里面的设定自动执行。
+But **`.github/workflows/*.yml` "workflow files" are a GitHub Actions-specific convention**: GitHub looks for YAML files in your repo's `.github/workflows/` folder and executes them according to the settings.
 
-> 📌 一句话：**YAML 是通用格式，`daily_forecast.yml` 是"用 YAML 写的一份 GitHub 自动化说明书"。**
+> One sentence: **YAML is a general format; `daily_forecast.yml` is "a GitHub automation manual written in YAML".**
 
 ---
 
-## 2. 训练完的模型到底是个什么东西？（你的问题 9 核心）
+## 2. What Exactly Is the Trained Model? (Your Question 9, the Core)
 
-你问："训练完成的模型是 CSV 吗？是 notebook 吗？能改 notebook 里的数据来预测吗？"
+You asked: "Is the trained model a CSV? Is it a notebook? Can I change the data in the notebook to predict?"
 
-**都不是。** 让我彻底讲清楚：
+**None of those.** Let me explain thoroughly:
 
-### 2.1 训练完得到的是 .pkl 文件（模型文件）
+### 2.1 After Training You Get a .pkl File (the Model File)
 
-训练完成后，代码会执行这一句（在 notebook 最后）：
+After training finishes, the code runs this line (at the end of the notebook):
 
 ```python
 joblib.dump({
-    'model': model_v25,            # ① 训练好的模型本体
-    'feature_cols': X_train.columns.tolist(),  # ② 用了哪些特征
-    'step_min': 15,                # ③ 分辨率（15分钟）
+    'model': model_v25,            # the trained model itself
+    'feature_cols': X_train.columns.tolist(),  # which features were used
+    'step_min': 15,                # the resolution (15 minutes)
 }, 'models/saved/xgboost_v2_5.pkl')
 ```
 
-`joblib.dump()` 把内存里那个"训练好的大脑"**打包保存成磁盘文件**，后缀是 `.pkl`。
+`joblib.dump()` **packages the "trained brain" in memory into a disk file**, with the `.pkl` extension.
 
-**类比**：训练好的模型就像"一个学完了所有知识的大脑"。`.pkl` 文件就是把这个大脑**冷冻保存**起来的容器。`.pkl` = pickle（泡菜/腌渍）——意思是"把对象腌起来保存"。
+**Analogy**: a trained model is like "a brain that has learned all the knowledge". The `.pkl` file is the container that **freezes and preserves** this brain. `.pkl` = pickle — meaning "preserve the object like pickling vegetables".
 
-### 2.2 .pkl 里到底装了哪三样东西？
+### 2.2 What Three Things Are Inside the .pkl?
 
-| 字段           | 中文       | 作用                                 |
-| -------------- | ---------- | ------------------------------------ |
-| `model`        | 模型本体   | 真正用来预测的"大脑"                 |
-| `feature_cols` | 特征列名单 | 预测时要给模型喂哪些列（顺序不能错） |
-| `step_min`     | 时间分辨率 | 60=小时，15=15分钟                   |
+| Field          | What it is              | Purpose                                                         |
+| -------------- | ----------------------- | --------------------------------------------------------------- |
+| `model`        | the model itself        | the "brain" actually used to predict                            |
+| `feature_cols` | the feature-column list | which columns to feed the model when predicting (order matters) |
+| `step_min`     | the time resolution     | 60 = hourly, 15 = 15 minutes                                    |
 
-**这就是为什么不是"改 notebook 数据就能预测"**：notebook 是"学校"（用来训练），预测时你不需要学校，你只需要**解冻模型文件**（`.pkl`），然后用新数据喂给它。
+**This is why "changing the notebook data" is not how you predict**: the notebook is the "school" (for training). When predicting, you do not need the school; you only need to **thaw the model file (`.pkl`)** and feed new data into it.
 
-### 2.3 预测 = 加载 .pkl + 调用 predict()
+### 2.3 Prediction = Load the .pkl + Call predict()
 
 ```python
 import joblib
-meta = joblib.load('models/saved/xgboost_v2_5.pkl')   # 解冻大脑
-model = meta['model']                                   # 拿出模型
-pred = model.predict(新的一行特征)                       # 用大脑算未来
+meta = joblib.load('models/saved/xgboost_v2_5.pkl')   # thaw the brain
+model = meta['model']                                   # take out the model
+pred = model.predict(a_new_row_of_features)             # use the brain to compute the future
 ```
 
-**你的思维需要升级的地方**：训练和预测是两个阶段——
+**Where your thinking needs to be upgraded**: training and prediction are two stages —
 
-- 训练：教大脑（notebook，一次性的）
-- 预测：用大脑（predict_system.py，每天重复的）
+- training: teach the brain (notebook, one-time)
+- prediction: use the brain (predict_system.py, repeated every day)
 
 ---
 
-## 3. models/ 文件夹、.gitkeep、.pkl 都是什么？（你的问题 8）
+## 3. What Are the models/ Folder, .gitkeep, and .pkl? (Your Question 8)
 
-### 3.1 三个概念
+### 3.1 Three Concepts
 
-| 东西            | 是什么                  | 作用                 |
-| --------------- | ----------------------- | -------------------- |
-| `models/saved/` | 模型仓库文件夹          | 存放所有训练好的模型 |
-| `*.pkl`         | 训练好的模型文件        | 预测程序读取它们     |
-| `.gitkeep`      | 占位文件（placeholder） | 让 git 保留空文件夹  |
+| Item            | What it is                 | Purpose                           |
+| --------------- | -------------------------- | --------------------------------- |
+| `models/saved/` | the model warehouse folder | stores all trained models         |
+| `*.pkl`         | the trained model files    | the prediction program reads them |
+| `.gitkeep`      | a placeholder file         | lets git keep the empty folder    |
 
-### 3.2 .gitkeep 是干嘛的？
+### 3.2 What Is .gitkeep for?
 
-**git 不跟踪"空文件夹"**——如果文件夹里什么都没，git 提交时会忽略它。`.gitkeep` 是一个约定俗成的**空占位文件**，让文件夹"看起来有东西"，git 就会把它带进仓库。
+**git does not track "empty folders"** — if a folder is completely empty, git ignores it when committing. `.gitkeep` is a **conventional empty placeholder file** that makes the folder "look non-empty", so git will bring it into the repo.
 
-> 📌 它本身没任何作用，就是"占个位"。你可以把它理解成：在空房间里放一把椅子，这样 git 才会"记住"这个房间存在。
+> It has no real function; it just "holds a place". Think of it as putting a chair in an empty room so git "remembers" that the room exists.
 
-### 3.3 ⚠️ 我帮你发现的坑：V3 模型没有被 git 跟踪！
+### 3.3 WARNING - A Pitfall I Found For You: The V3 Models Are NOT Tracked by Git!
 
-我看了你的 `.gitignore`，里面有这样几行：
+I looked at your `.gitignore`, which contains these lines:
 
 ```gitignore
 *.pkl
-!models/saved/xgboost_v*.pkl          # 放行原版 XGBoost
-!models/saved/lightgbm_v2.pkl         # 放行 lightgbm_v2
-!models/saved/lightgbm_v2_5.pkl       # 放行 lightgbm_v2_5
+!models/saved/xgboost_v*.pkl          # allow the original XGBoost models
+!models/saved/lightgbm_v2.pkl         # allow lightgbm_v2
+!models/saved/lightgbm_v2_5.pkl       # allow lightgbm_v2_5
 ```
 
-含义是：
+What this means:
 
-- `*.pkl` = 默认所有 .pkl **都不提交**（模型文件很大，不该随便提交）
-- `!xxx` = 但**这几个例外要提交**（放行）
+- `*.pkl` = by default all .pkl files are **not committed** (model files are big; you should not commit them casually)
+- `!xxx` = but **these exceptions should be committed** (allowlisted)
 
-**结果**：
+**Result**:
 
-- ✅ 会提交：`xgboost_v1/v1_5/v2/v2_5.pkl`、`lightgbm_v2.pkl`、`lightgbm_v2_5.pkl`（共6个）
-- ❌ **不会提交**：你刚生成的 `xgboost_v3.pkl` 和 `lightgbm_v3.pkl`（不在放行名单！）
+- Will be committed: `xgboost_v1/v1_5/v2/v2_5.pkl`, `lightgbm_v2.pkl`, `lightgbm_v2_5.pkl` (6 in total)
+- Will **NOT** be committed: your newly generated `xgboost_v3.pkl` and `lightgbm_v3.pkl` (they are not on the allowlist!)
 
-**后果**：你的 V3 模型只在本地，推送到 GitHub 后**远程仓库没有它们**，所以 GitHub Actions 每天自动跑的时候**找不到 V3 模型，只会跑那 6 个原版模型**。
+**Consequence**: your V3 models exist only locally. After pushing to GitHub, the **remote repo does not have them**, so when GitHub Actions runs automatically every day, it **cannot find the V3 models and will only run the 6 original models**.
 
-> 如果你想 GitHub 上也跑 V3，需要在 `.gitignore` 里加两行：
+> If you want GitHub to also run V3, you need to add two lines to `.gitignore`:
 >
 > ```gitignore
 > !models/saved/xgboost_v3.pkl
@@ -161,176 +161,179 @@ pred = model.predict(新的一行特征)                       # 用大脑算未
 
 ---
 
-## 4. predict_system.py 是什么？（你的问题 7）
+## 4. What Is predict_system.py? (Your Question 7)
 
-你说"我只知道训练模型"——对，`predict_system.py` 就是**训练之外的另一半：预测系统**。
+You said "I only know how to train models" — right, `predict_system.py` is **the other half besides training: the prediction system**.
 
-### 4.1 它在哪里？
+### 4.1 Where Does It Live?
 
 ```
 src/
-├── config.py          ← 配置（路径、API、参数）
-├── fetch_live.py      ← 从3个API拿最新数据
-├── features.py        ← 造特征（和训练时一模一样！）
-├── predict_system.py  ← ★主程序：预测的总指挥
-└── utils.py           ← 工具（空）
+├── config.py          <- configuration (paths, APIs, parameters)
+├── fetch_live.py      <- fetch the latest data from 3 APIs
+├── features.py        <- build features (exactly the same as during training!)
+├── predict_system.py  <- *main program: the conductor of prediction
+└── utils.py           <- utilities (empty)
 ```
 
-### 4.2 它的核心职责（对照代码）
+### 4.2 Its Core Responsibilities (Against the Code)
 
-| 函数             | 做什么                                      |
-| ---------------- | ------------------------------------------- |
-| `main()`         | 总指挥：算时间、调数据、调模型、存结果      |
-| `load_models()`  | ★**扫描并加载 `models/saved/` 里所有 .pkl** |
-| `run_forecast()` | ★**递归预测未来7天**（672个15分钟点）       |
-| `fill_actuals()` | 过去的时间点补上真实价格                    |
-| `save_csv()`     | 每个模型存一个 CSV                          |
+| Function         | What it does                                                       |
+| ---------------- | ------------------------------------------------------------------ |
+| `main()`         | the conductor: compute time, call data, load models, save results  |
+| `load_models()`  | \*scan and load all .pkl files in `models/saved/`                  |
+| `run_forecast()` | \*recursively forecast the next 7 days (672 fifteen-minute points) |
+| `fill_actuals()` | back-fill real prices for past time points                         |
+| `save_csv()`     | save one CSV per model                                             |
 
-关键代码（你问的"模型在哪启动"）：
+The key code (where you asked "how are the models started"):
 
 ```python
 def load_models():
     models = {}
-    for pkl in sorted(config.SAVED_MODELS_DIR.glob('*.pkl')):  # 扫描所有.pkl
-        meta = joblib.load(pkl)                                 # 逐个解冻
-        models[pkl.stem] = meta                                 # 放进字典
+    for pkl in sorted(config.SAVED_MODELS_DIR.glob('*.pkl')):  # scan all .pkl
+        meta = joblib.load(pkl)                                 # thaw each one
+        models[pkl.stem] = meta                                 # put into a dict
     return models
 ```
 
-> 📌 **所以"启动所有模型"的代码就在 `src/predict_system.py` 的 `load_models()` 里**——它自动扫描 `models/saved/` 文件夹，把里面每一个 `.pkl` 都加载进来。**不需要手动指定模型**，放进去多少它就加载多少。
+> So **the "start all models" code is in `src/predict_system.py` inside `load_models()`** — it automatically scans the `models/saved/` folder and loads every `.pkl` in it. **You do not need to specify models manually**; whatever you put in, it loads that many.
 
-递归预测的核心（`run_forecast`）：
+The core of recursive forecasting (`run_forecast`):
 
 ```python
-for i in range(FORECAST_HOURS * (60 // step_min)):   # 比如 672 次
-    features = build_features(timestamp, price_buf, wx_buf)  # 造这一时刻的特征
-    prediction = model.predict(row)[0]                        # 预测
-    price_buf.add(timestamp, prediction)                      # 把预测当"历史"喂回
+for i in range(FORECAST_HOURS * (60 // step_min)):   # e.g. 672 times
+    features = build_features(timestamp, price_buf, wx_buf)  # build features for this moment
+    prediction = model.predict(row)[0]                        # predict
+    price_buf.add(timestamp, prediction)                      # feed the prediction back as "history"
 ```
 
 ---
 
-## 5. 工作流（.yml）是怎么"启动所有模型"的？（你的问题 6）
+## 5. How Does the Workflow (.yml) "Start All Models"? (Your Question 6)
 
-关键认知：**工作流本身不直接加载模型**。它只做一件事：**喊一句命令**。
+Key insight: **the workflow itself does not directly load models**. It only does one thing: **run one command**.
 
 ```yaml
 - name: Run prediction system
-  run: python src/predict_system.py # ← 唯一的关键命令
+  run: python src/predict_system.py # <- the only key command
 ```
 
-然后 `predict_system.py` 内部自己会去加载模型（见第 4 节）。整个链条是：
+Then `predict_system.py` loads the models by itself (see section 4). The whole chain is:
 
 ```
 daily_forecast.yml
-   └─> 运行 python src/predict_system.py
-          ├─> load_models()  扫 models/saved/*.pkl → 加载全部
-          ├─> fetch_live     拿天气+电价
-          ├─> run_forecast   每个模型预测7天
-          └─> save_csv       每个模型存一个CSV
+   └─> run python src/predict_system.py
+          ├─> load_models()  scan models/saved/*.pkl -> load all
+          ├─> fetch_live     get weather + prices
+          ├─> run_forecast   each model predicts 7 days
+          └─> save_csv       each model saves one CSV
 ```
 
-> 📌 就像你的本地命令 `python src/predict_system.py` 一样——GitHub 每天跑的就是**同一条命令**，只是它在云端自动跑。
+> Just like your local command `python src/predict_system.py` — GitHub runs **the same command** every day, only it runs in the cloud automatically.
 
 ---
 
-## 6. 预测结果：几个 CSV？里面是什么？（你的问题 4、5）
+## 6. The Prediction Results: How Many CSVs? What Is Inside? (Your Questions 4, 5)
 
-### 6.1 几个 CSV？
+### 6.1 How Many CSVs?
 
-**6 个 CSV（不是 7 个）**，每个模型一个：
+**6 CSVs (not 7)**, one per model:
 
 ```
 predictions/
-├── xgboost_v1_forecasts.csv       ← XGBoost V1 的预测
-├── xgboost_v1_5_forecasts.csv     ← XGBoost V1.5
-├── xgboost_v2_forecasts.csv       ← XGBoost V2
-├── xgboost_v2_5_forecasts.csv     ← XGBoost V2.5（15分钟）
-├── lightgbm_v2_forecasts.csv      ← LightGBM V2
-└── lightgbm_v2_5_forecasts.csv    ← LightGBM V2.5
+├── xgboost_v1_forecasts.csv       <- XGBoost V1 forecast
+├── xgboost_v1_5_forecasts.csv     <- XGBoost V1.5
+├── xgboost_v2_forecasts.csv       <- XGBoost V2
+├── xgboost_v2_5_forecasts.csv     <- XGBoost V2.5 (15-minute)
+├── lightgbm_v2_forecasts.csv      <- LightGBM V2
+└── lightgbm_v2_5_forecasts.csv    <- LightGBM V2.5
 ```
 
-> 你可能会说"7个"——也许你把 7 天和文件数搞混了。目前提交的模型是 6 个 → 6 个 CSV。**每个 CSV 里都装着未来 7 天的预测**。
+> You might say "7" — maybe you mixed up the 7 days with the number of files. The committed models are 6 -> 6 CSVs. **Each CSV contains the next 7 days of forecasts.**
 
-### 6.2 一个 CSV 里装的是"未来 7 天"，粒度和模型有关
+### 6.2 One CSV Contains "the Next 7 Days"; the Granularity Depends on the Model
 
-| 模型类型                  | 时间粒度           | 7天多少行         |
-| ------------------------- | ------------------ | ----------------- |
-| 15 分钟模型（V1.5、V2.5） | 每 15 分钟一个预测 | 7×96 = **672 行** |
-| 小时模型（V1、V2）        | 每小时一个预测     | 7×24 = **168 行** |
+| Model type                    | Time granularity            | Rows for 7 days     |
+| ----------------------------- | --------------------------- | ------------------- |
+| 15-minute models (V1.5, V2.5) | one prediction every 15 min | 7x96 = **672 rows** |
+| hourly models (V1, V2)        | one prediction every hour   | 7x24 = **168 rows** |
 
-每一行格式：
+Each row format:
 
 ```
-run_date           = 哪一天做的预测
-target_datetime    = 预测的是哪个时刻
-predicted_price    = 预测电价（EUR/MWh）
-actual_price       = 真实电价（过几天自动回填）
-abs_error          = 误差 |真实-预测|
+run_date           = the day the forecast was made
+target_datetime    = which moment is being predicted
+predicted_price    = predicted price (EUR/MWh)
+actual_price       = real price (back-filled automatically after a few days)
+abs_error          = error |actual - predicted|
 ```
 
-### 6.3 每天怎么积累？
+### 6.3 How Does It Accumulate Day by Day?
 
-（上一轮讲过，这里一句话复习）：**同一个文件每天"追加"新一批 `run_date`**，不是删旧建新。所以一个文件里跑了一个月，就有 30 批不同的 `run_date`。
+(Review in one sentence from the earlier discussion): **the same file "appends" a new batch of `run_date` every day**; it does not delete old and create new. So if the file has run for a month, it will contain 30 batches of different `run_date` values.
 
 ---
 
-## 7. 完整心智模型（从训练到自动预测）
+## 7. The Complete Mental Model (From Training to Automated Prediction)
 
 ```
-① 训练（你会的）
-   notebook → 数据/特征/模型 → 存成 model.pkl
-                    ↓
-② 提交（git）
-   model.pkl + 预测代码 + 工作流 → push 到 GitHub
-                    ↓
-③ 部署（GitHub Actions 每天自动）
-   .yml 定时器 → python src/predict_system.py
-              → 加载 model.pkl → 拿数据 → 造特征 → 预测7天
-              → 存 predictions/*.csv → git commit
-                    ↓
-④ 查看结果
-   打开 predictions/*.csv 或画折线图
+1. Train (you already know this)
+   notebook -> data/features/model -> save as model.pkl
+                    |
+                    v
+2. Commit (git)
+   model.pkl + prediction code + workflow -> push to GitHub
+                    |
+                    v
+3. Deploy (GitHub Actions runs automatically every day)
+   .yml timer -> python src/predict_system.py
+              -> load model.pkl -> fetch data -> build features -> predict 7 days
+              -> save predictions/*.csv -> git commit
+                    |
+                    v
+4. View the results
+   open predictions/*.csv or draw line charts
 ```
 
-**对照你现在的情况（只做完了①）**：
+**Compared to where you are now (you have only done step 1)**:
 
-- ✅ 你已经会训练 XGBoost V2 → 它会生成 `xgboost_v2.pkl`
-- ❌ 你还没理解 ③④：预测程序读取 .pkl → 自动出 CSV → GitHub 每天自动跑
-
----
-
-## 8. 你现在缺的"下一步"清单
-
-| 步骤 | 做什么                                                              | 状态        |
-| ---- | ------------------------------------------------------------------- | ----------- |
-| 1    | 本地运行 `python src/predict_system.py` 看它加载模型、出 CSV        | 你做过了 ✅ |
-| 2    | 理解 `src/predict_system.py` 的 `load_models()` 和 `run_forecast()` | 本文第4节   |
-| 3    | 把训练好的新模型（如 V3）放行到 `.gitignore`，才能被 GitHub 跑      | ⚠️ 需要你改 |
-| 4    | 推送代码到 GitHub，让 `daily_forecast.yml` 每天自动跑               | 待做        |
-| 5    | 到 GitHub 网页 → Actions 标签页，看每天的运行日志                   | 待做        |
+- You already know how to train XGBoost V2 -> it generates `xgboost_v2.pkl`
+- You have not yet understood steps 3 and 4: the prediction program reads the .pkl -> automatically produces CSVs -> GitHub runs it every day
 
 ---
 
-## 9. 术语表（中英对照）
+## 8. The "Next Steps" Checklist You Are Missing
 
-| 中文      | English                             | 一句话解释                         |
-| --------- | ----------------------------------- | ---------------------------------- |
-| 训练      | Training                            | 让模型从历史数据学规律（一次性）   |
-| 预测      | Prediction / Inference              | 用训练好的模型算未来（反复用）     |
-| 部署      | Deployment                          | 把训练好的模型放进能自动运行的环境 |
-| 模型文件  | Model artifact                      | 训练结果的"打包文件"（.pkl）       |
-| 序列化    | Serialization                       | 把内存对象存成文件（joblib.dump）  |
-| 反序列化  | Deserialization                     | 把文件读回内存（joblib.load）      |
-| 配置文件  | Config file                         | 描述设定的文件（YAML/JSON）        |
-| 工作流    | Workflow                            | GitHub 上定义自动步骤的 YAML 文件  |
-| 定时任务  | Scheduled job                       | 到点自动执行的任务（cron）         |
-| CI/CD     | Continuous Integration / Deployment | 自动化"集成+部署"的一套实践        |
-| 占位文件  | Placeholder                         | 让 git 保留空文件夹的 .gitkeep     |
-| git 忽略  | Gitignore                           | 告诉 git 哪些文件不提交            |
-| 放行/例外 | Allowlist / Exception               | gitignore 里 `!` 开头的例外规则    |
-| 递归预测  | Recursive forecasting               | 用上一步预测当下一步的历史         |
+| Step | What to do                                                                         | Status                  |
+| ---- | ---------------------------------------------------------------------------------- | ----------------------- |
+| 1    | run `python src/predict_system.py` locally and see it load models and produce CSVs | you already did this    |
+| 2    | understand `load_models()` and `run_forecast()` in `src/predict_system.py`         | section 4 of this guide |
+| 3    | allowlist your new models (e.g. V3) in `.gitignore` so GitHub can run them         | needs your action       |
+| 4    | push the code to GitHub so `daily_forecast.yml` runs every day automatically       | to do                   |
+| 5    | open GitHub web page -> Actions tab -> see the daily run logs                      | to do                   |
 
 ---
 
-_本指南结合 `.github/workflows/daily_forecast.yml`、`src/predict_system.py`、`models/saved/`、`.gitignore` 写成。核心一句话：训练产生 .pkl 模型文件，predict_system.py 读取它来预测，.yml 每天自动喊 predict_system.py 跑，结果存成 6 个（每模型一个）包含未来 7 天的 CSV。_
+## 9. Glossary (English)
+
+| English                | One-line explanation                                                                                      |
+| ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| Training               | let the model learn patterns from historical data (one-time)                                              |
+| Prediction / Inference | use the trained model to compute the future (repeatedly)                                                  |
+| Deployment             | put the trained model into an environment that can run automatically                                      |
+| Model artifact         | the "packaged file" of the training result (.pkl)                                                         |
+| Serialization          | store an in-memory object to a file (joblib.dump)                                                         |
+| Deserialization        | read a file back into memory (joblib.load)                                                                |
+| Config file            | a file describing settings (YAML/JSON)                                                                    |
+| Workflow               | a YAML file that defines automatic steps on GitHub                                                        |
+| Scheduled job          | a task that runs automatically at a set time (cron)                                                       |
+| CI/CD                  | Continuous Integration / Continuous Deployment; a set of practices for automated integration + deployment |
+| Placeholder            | a .gitkeep file that lets git keep an empty folder                                                        |
+| Gitignore              | tells git which files not to commit                                                                       |
+| Allowlist / Exception  | the exception rules starting with `!` in .gitignore                                                       |
+| Recursive forecasting  | use the previous prediction as the history for the next step                                              |
+
+---
+
+_This guide was written from `.github/workflows/daily_forecast.yml`, `src/predict_system.py`, `models/saved/`, and `.gitignore`. Core idea in one sentence: training produces the .pkl model file, predict_system.py reads it to predict, the .yml wakes predict_system.py every day automatically, and the results are stored as 6 CSVs (one per model), each containing the next 7 days._
