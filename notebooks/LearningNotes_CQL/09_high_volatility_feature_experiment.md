@@ -1,4 +1,4 @@
-# 09 The High-Volatility Feature Experiment: Does It Help? (English)
+# 09 The High-Volatility Feature Experiment: Does It Help?
 
 > A controlled experiment (controlled experiment) to test whether adding the `high_volatility_prob` feature improves the electricity-price model.
 > Related notebooks:
