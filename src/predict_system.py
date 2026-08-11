@@ -127,8 +127,12 @@ def main() -> None:
     print(f'Forecast end   : {predict_end:%Y-%m-%d %H:%M}')
 
     history_start = now - pd.Timedelta(hours=config.PRICE_HISTORY_HOURS)
-    print(f'\nFetching FI prices {history_start:%Y-%m-%d} → now ...')
-    actual_prices = fetch_live.fetch_prices(history_start, now)
+    # Nord Pool publishes tomorrow's prices ~12:00 EET, workflow runs ~14:00 EEST.
+    # Fetching through end of the next delivery day ensures the price buffer has
+    # valid lag features for the first forecast steps instead of NaN.
+    price_fetch_end = predict_start + pd.Timedelta(hours=24)
+    print(f'\nFetching FI prices {history_start:%Y-%m-%d} → {price_fetch_end:%Y-%m-%d %H:%M} ...')
+    actual_prices = fetch_live.fetch_prices(history_start, price_fetch_end)
     print(f'  got {len(actual_prices)} price records')
 
     weather_end = predict_start + pd.Timedelta(hours=FORECAST_HOURS)
