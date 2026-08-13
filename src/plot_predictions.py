@@ -46,6 +46,7 @@ MODEL_COLORS = {
     'xgboost_v1_5': '#6d6d6d',
     'xgboost_v2':   '#1f77b4',
     'xgboost_v2_5': '#2ca02c',
+    'xgboost_v2_5_2': '#9467bd',
     'lightgbm_v2':  '#ff7f0e',
     'lightgbm_v2_5': '#d62728',
 }

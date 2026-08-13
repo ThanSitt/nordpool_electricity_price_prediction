@@ -129,7 +129,7 @@ pred = model.predict(a_new_row_of_features)             # use the brain to compu
 
 > It has no real function; it just "holds a place". Think of it as putting a chair in an empty room so git "remembers" that the room exists.
 
-### 3.3 WARNING - A Pitfall I Found For You: The V3 Models Are NOT Tracked by Git!
+### 3.3 WARNING - A Pitfall I Found For You: The V2.5.2 Models Are NOT Tracked by Git!
 
 I looked at your `.gitignore`, which contains these lines:
 
@@ -148,15 +148,15 @@ What this means:
 **Result**:
 
 - Will be committed: `xgboost_v1/v1_5/v2/v2_5.pkl`, `lightgbm_v2.pkl`, `lightgbm_v2_5.pkl` (6 in total)
-- Will **NOT** be committed: your newly generated `xgboost_v3.pkl` and `lightgbm_v3.pkl` (they are not on the allowlist!)
+- Will **NOT** be committed: your newly generated `xgboost_v2_5_2.pkl` and `lightgbm_v2_5_2.pkl` (they are not on the allowlist!)
 
-**Consequence**: your V3 models exist only locally. After pushing to GitHub, the **remote repo does not have them**, so when GitHub Actions runs automatically every day, it **cannot find the V3 models and will only run the 6 original models**.
+**Consequence**: your V2.5.2 models exist only locally. After pushing to GitHub, the **remote repo does not have them**, so when GitHub Actions runs automatically every day, it **cannot find the V2.5.2 models and will only run the 6 original models**.
 
-> If you want GitHub to also run V3, you need to add two lines to `.gitignore`:
+> If you want GitHub to also run V2.5.2, you need to add two lines to `.gitignore`:
 >
 > ```gitignore
-> !models/saved/xgboost_v3.pkl
-> !models/saved/lightgbm_v3.pkl
+> !models/saved/xgboost_v2_5_2.pkl
+> !models/saved/lightgbm_v2_5_2.pkl
 > ```
 
 ---
@@ -309,7 +309,7 @@ abs_error          = error |actual - predicted|
 | ---- | ---------------------------------------------------------------------------------- | ----------------------- |
 | 1    | run `python src/predict_system.py` locally and see it load models and produce CSVs | you already did this    |
 | 2    | understand `load_models()` and `run_forecast()` in `src/predict_system.py`         | section 4 of this guide |
-| 3    | allowlist your new models (e.g. V3) in `.gitignore` so GitHub can run them         | needs your action       |
+| 3    | allowlist your new models (e.g. V2.5.2) in `.gitignore` so GitHub can run them         | needs your action       |
 | 4    | push the code to GitHub so `daily_forecast.yml` runs every day automatically       | to do                   |
 | 5    | open GitHub web page -> Actions tab -> see the daily run logs                      | to do                   |
 
