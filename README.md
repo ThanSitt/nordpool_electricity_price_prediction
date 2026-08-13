@@ -154,8 +154,8 @@ The original XGBoost models used near-default hyperparameters while the LightGBM
 
 **Results:**
 
-| Model       | CV MAE | Test MAE   | Test RMSE  | Test R²    |
-| ----------- | ------ | ---------- | ---------- | ---------- |
+| Model           | CV MAE | Test MAE   | Test RMSE  | Test R²    |
+| --------------- | ------ | ---------- | ---------- | ---------- |
 | XGBoost V2.5.2  | 2.9952 | 2.7652     | 8.2342     | 0.9717     |
 | LightGBM V2.5.2 | 2.8851 | **2.7167** | **8.0958** | **0.9727** |
 

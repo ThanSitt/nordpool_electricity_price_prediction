@@ -309,7 +309,7 @@ abs_error          = error |actual - predicted|
 | ---- | ---------------------------------------------------------------------------------- | ----------------------- |
 | 1    | run `python src/predict_system.py` locally and see it load models and produce CSVs | you already did this    |
 | 2    | understand `load_models()` and `run_forecast()` in `src/predict_system.py`         | section 4 of this guide |
-| 3    | allowlist your new models (e.g. V2.5.2) in `.gitignore` so GitHub can run them         | needs your action       |
+| 3    | allowlist your new models (e.g. V2.5.2) in `.gitignore` so GitHub can run them     | needs your action       |
 | 4    | push the code to GitHub so `daily_forecast.yml` runs every day automatically       | to do                   |
 | 5    | open GitHub web page -> Actions tab -> see the daily run logs                      | to do                   |
 
