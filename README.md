@@ -63,7 +63,7 @@ nordpool_electricity_price_prediction/
 │   └── convertData/                 ← Processed datasets
 │       ├── V1.5_15min_Dataset.csv   ← Merged 15-min data (no features)
 │       ├── V2.5_15min_features.csv  ← Feature-engineered 15-min data
-│       ├── feature_high_volatility.ipynb   ← High-volatility classifier + feature (V3.1)
+│       ├── feature_high_volatility.ipynb   ← High-volatility classifier + feature (V2.5.1)
 │       └── V2.5.1_15min_Risk_Enhanced_Dataset.csv  ← V2.5 + high_volatility_prob feature
 │
 ├── xgboost_models/                  ← XGBoost training notebooks
@@ -71,8 +71,8 @@ nordpool_electricity_price_prediction/
 │   ├── modelV1.5.ipynb              ← V1.5: 15-min, weather only
 │   ├── modelV2.ipynb                ← V2: hourly, engineered features
 │   ├── modelV2.5.ipynb              ← V2.5: 15-min, engineered features (best)
-│   ├── modelV3_Optuna_comparison.ipynb     ← V3: fair XGBoost vs LightGBM (Optuna-tuned)
-│   └── modelV3_1_risk_feature_test.ipynb   ← V3.1: controlled test of the risk feature
+│   ├── modelV2.5.2.ipynb            ← V2.5.2: fair XGBoost vs LightGBM (Optuna-tuned)
+│   └── modelV2.5.1.ipynb            ← V2.5.1: controlled test of the risk feature
 │
 ├── lightgbm_models/                 ← LightGBM training notebooks
 │   ├── modelV2.ipynb                ← V2: hourly + engineered
@@ -131,18 +131,18 @@ Both algorithms are trained on the same data with the same features. The LightGB
 
 ---
 
-## V3 & V3.1 Experiments (2026-08)
+## V2.5.2 & V2.5.1 Experiments (2026-08)
 
 Two follow-up experiments were added after the original four model versions. They answer two separate questions:
 
-1. **V3 — Fair comparison:** which algorithm is really better, once both are tuned fairly?
-2. **V3.1 — Feature test:** does adding a "high-volatility probability" feature actually help the price model?
+1. **V2.5.2 — Fair comparison:** which algorithm is really better, once both are tuned fairly?
+2. **V2.5.1 — Feature test:** does adding a "high-volatility probability" feature actually help the price model?
 
-### V3 — Fair Comparison: XGBoost vs LightGBM (both Optuna-tuned)
+### V2.5.2 — Fair Comparison: XGBoost vs LightGBM (both Optuna-tuned)
 
 The original XGBoost models used near-default hyperparameters while the LightGBM models were Optuna-tuned, which made the comparison **unfair** (an undertrained XGBoost vs. a carefully tuned LightGBM).
 
-**Method** (`xgboost_models/modelV3_Optuna_comparison.ipynb`) — everything identical except the algorithm:
+**Method** (`xgboost_models/modelV2.5.2.ipynb`) — everything identical except the algorithm:
 
 | Control variable | Setting                                                             |
 | ---------------- | ------------------------------------------------------------------- |
@@ -156,12 +156,12 @@ The original XGBoost models used near-default hyperparameters while the LightGBM
 
 | Model       | CV MAE | Test MAE   | Test RMSE  | Test R²    |
 | ----------- | ------ | ---------- | ---------- | ---------- |
-| XGBoost V3  | 2.9952 | 2.7652     | 8.2342     | 0.9717     |
-| LightGBM V3 | 2.8851 | **2.7167** | **8.0958** | **0.9727** |
+| XGBoost V2.5.2  | 2.9952 | 2.7652     | 8.2342     | 0.9717     |
+| LightGBM V2.5.2 | 2.8851 | **2.7167** | **8.0958** | **0.9727** |
 
 **Conclusion:** under a fair setup, LightGBM is slightly better on all metrics (~1.8% lower MAE), but the two are much closer than the original comparison suggested. Tuning XGBoost clearly helped it (MAE dropped from ~2.82 to 2.77).
 
-### V3.1 — High-Volatility Probability Feature Experiment
+### V2.5.1 — High-Volatility Probability Feature Experiment
 
 **Idea:** train a "storm warning" classifier (XGBClassifier) that takes only **weather + time** and outputs `high_volatility_prob` — a 0–1 probability that "this 15-minute moment will be highly volatile" (defined as the top 15% of a 6-hour rolling price std). Then add this probability as a new feature to the price model.
 
@@ -180,14 +180,14 @@ The original XGBoost models used near-default hyperparameters while the LightGBM
 
 The two distributions separate → the feature **carries signal**, but weakly (overlapping tails).
 
-**Step 2 — Controlled test** (`xgboost_models/modelV3_1_risk_feature_test.ipynb`): same data, same chronological 80/20 split, same Optuna-tuned hyperparameters; the **only** difference is whether `high_volatility_prob` is included as a feature. (`price_roll_std_6h` and `is_high_volatility` were excluded from both versions — they are answers derived from price and would leak information.)
+**Step 2 — Controlled test** (`xgboost_models/modelV2.5.1.ipynb`): same data, same chronological 80/20 split, same Optuna-tuned hyperparameters; the **only** difference is whether `high_volatility_prob` is included as a feature. (`price_roll_std_6h` and `is_high_volatility` were excluded from both versions — they are answers derived from price and would leak information.)
 
 | Model    | Without risk feature | With risk feature | MAE change | Verdict |
 | -------- | -------------------- | ----------------- | ---------- | ------- |
 | XGBoost  | 2.7555               | 2.7957            | +0.0402    | worse   |
 | LightGBM | 2.7165               | 2.7426            | +0.0261    | worse   |
 
-**Conclusion:** adding `high_volatility_prob` made both models slightly **worse** (MAE up ~1%). In its current form this feature should **not** be added to V3. The likely cause is the weak classifier (recall 0.24) feeding "weak signal + noise" into models that already have 49 strong features.
+**Conclusion:** adding `high_volatility_prob` made both models slightly **worse** (MAE up ~1%). In its current form this feature should **not** be added to V2.5.2. The likely cause is the weak classifier (recall 0.24) feeding "weak signal + noise" into models that already have 49 strong features.
 
 **Lesson:** this honest negative result is valuable — a feature can pass the signal check (histogram) yet still fail to help a model. Always validate features with a controlled experiment before adding them.
 

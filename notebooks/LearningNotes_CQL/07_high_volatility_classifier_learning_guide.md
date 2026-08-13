@@ -175,7 +175,7 @@ What it does: creates an "enhanced" dataset for the price model to retrain on.
 Your notebook lives inside the `data/convertData/` folder, so:
 
 - reading `'../data/convertData/V2.5_15min_features.csv'` becomes `data/data/...` (wrong)
-- saving `'../data/convertData/V3.0...csv'` also becomes `data/data/...` (wrong)
+- saving `'../data/convertData/V2.5.1...csv'` also becomes `data/data/...` (wrong)
 
 **Fix**: because you are already inside `data/convertData/`, just use the file name directly:
 
@@ -283,18 +283,18 @@ print(f"Matrix saved to: {save_path}")
 
 ---
 
-## 5. How to Use This New Feature in the Price Model (V3)?
+## 5. How to Use This New Feature in the Price Model (V2.5.2)?
 
 Once `high_volatility_prob` is created, making the price model use it takes **three steps**:
 
 ```
 Step 1: this notebook -> generate V2.5.1_15min_Risk_Enhanced_Dataset.csv (already contains the new feature)
-Step 2: in the V3 comparison notebook, include the new column when training the price model
+Step 2: in the V2.5.2 comparison notebook, include the new column when training the price model
         e.g. after df.drop(columns=['price','datetime']), the model will automatically see the new column
 Step 3: WARNING: you must also update src/features.py (see section 6)
 ```
 
-In the V3 comparison notebook, you only need:
+In the V2.5.2 comparison notebook, you only need:
 
 ```python
 df = pd.read_csv('../data/convertData/V2.5.1_15min_Risk_Enhanced_Dataset.csv')
@@ -368,7 +368,7 @@ Bad news: **`src/features.py` does not contain this logic yet**. If you only cha
 | 1. Get it running      | run the 3 cells with the corrected code                                         | must      |
 | 2. Understand          | answer: how is the label created? what does predict_proba return?               | must      |
 | 3. Verify              | run the histogram in 6.5 and check whether the feature helps                    | important |
-| 4. Integrate           | add the new feature to the V3 price model, retrain, compare whether it improved | important |
+| 4. Integrate           | add the new feature to the V2.5.2 price model, retrain, compare whether it improved | important |
 | 5. Go live (advanced)  | mirror the logic into `src/features.py` + `src/predict_system.py`               | advanced  |
 | 6. Optimize (advanced) | fix the data leakage, handle class imbalance, try more features                 | advanced  |
 

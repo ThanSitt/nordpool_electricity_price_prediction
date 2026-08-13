@@ -4,7 +4,7 @@
 > Related notebooks:
 >
 > - `data/convertData/feature_high_volatility.ipynb` (build the classifier + histogram validation)
-> - `xgboost_models/modelV3_1_risk_feature_test.ipynb` (the controlled price-model test)
+> - `xgboost_models/modelV2.5.1.ipynb` (the controlled price-model test)
 >   Date: 2026-08-07
 
 ---
@@ -54,7 +54,7 @@ To isolate the effect of the new feature, we kept **everything else the same**:
 | ------------------- | --------------------------------------------------------------------------------------- |
 | Data                | the same risk-enhanced dataset (`V2.5.1_15min_Risk_Enhanced_Dataset.csv`, 105,193 rows) |
 | Split               | the same chronological 80/20 split                                                      |
-| Hyperparameters     | the same (the Optuna best params found in V3)                                           |
+| Hyperparameters     | the same (the Optuna best params found in V2.5.2)                                           |
 | Models              | XGBoost and LightGBM, each with 2000 trees                                              |
 | **Only difference** | whether `high_volatility_prob` is included as a feature                                 |
 
@@ -74,7 +74,7 @@ R² also dropped slightly for both (e.g. XGBoost 0.9727 -> 0.9716).
 
 ### 2.3 Verdict
 
-**Adding `high_volatility_prob` made both models slightly WORSE (MAE increased by about 1%).** So in its current form, this risk feature should NOT be added to the V3 price model.
+**Adding `high_volatility_prob` made both models slightly WORSE (MAE increased by about 1%).** So in its current form, this risk feature should NOT be added to the V2.5.2 price model.
 
 This "failure" is a valuable, honest result — not every intuitively sensible feature helps.
 
@@ -95,7 +95,7 @@ This "failure" is a valuable, honest result — not every intuitively sensible f
 ## 4. What We Learned (Key Takeaways)
 
 1. **The experiment design was correct**: controlling variables (same data, same split, same params, only one extra feature) makes the conclusion trustworthy. ✅
-2. **"No help" is also a valid conclusion**: we proved this risk feature is not worth adding to V3, saving future debugging time.
+2. **"No help" is also a valid conclusion**: we proved this risk feature is not worth adding to V2.5.2, saving future debugging time.
 3. **Feature validation has two levels**:
    - Level 1 (Experiment 2): does the feature carry signal? (histogram / correlation)
    - Level 2 (Experiment 1): does the feature improve the model? (controlled test)
@@ -108,7 +108,7 @@ This "failure" is a valuable, honest result — not every intuitively sensible f
 
 | Option | What to do                                                                         |
 | ------ | ---------------------------------------------------------------------------------- |
-| A      | strengthen the classifier (class imbalance, more features) -> re-run the V3.1 test |
+| A      | strengthen the classifier (class imbalance, more features) -> re-run the V2.5.1 test |
 | B      | accept the conclusion and move on to other features / tuning                       |
 | C      | test other candidate features using the same two-level validation method           |
 
@@ -120,7 +120,7 @@ This "failure" is a valuable, honest result — not every intuitively sensible f
 # 1) Build the risk feature (see feature_high_volatility.ipynb) and save:
 df.to_csv('V2.5.1_15min_Risk_Enhanced_Dataset.csv', index=False)
 
-# 2) In modelV3_1_risk_feature_test.ipynb:
+# 2) In modelV2.5.1.ipynb:
 df = pd.read_csv('../data/convertData/V2.5.1_15min_Risk_Enhanced_Dataset.csv')
 risk_cols = ['price_roll_std_6h', 'is_high_volatility', 'high_volatility_prob']
 baseline_cols = [c for c in df.columns if c not in ['price', 'datetime'] + risk_cols]

@@ -171,7 +171,7 @@ WHY: overlay the REAL price (black dashed line) once it becomes available. After
 ## 5. How to Use (使用方法)
 
 1. Run Part A cells first — verify the metrics match the README (e.g. xgboost_v2_5: MAE≈2.8, RMSE≈8.2, R²≈0.97).
-2. Change `model_name = 'xgboost_v2_5'` to any of the 8 saved models (e.g. `lightgbm_v2_5`, `xgboost_v3`) and re-run Part A to compare.
+2. Change `model_name = 'xgboost_v2_5'` to any of the 8 saved models (e.g. `lightgbm_v2_5`, `xgboost_v2_5_2`) and re-run Part A to compare.
 3. Re-run Part B whenever `predictions/` gets a new daily run — the charts update automatically.
 
 ---
