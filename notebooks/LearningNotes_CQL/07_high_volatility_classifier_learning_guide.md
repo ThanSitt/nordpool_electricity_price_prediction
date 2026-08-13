@@ -363,14 +363,14 @@ Bad news: **`src/features.py` does not contain this logic yet**. If you only cha
 
 ## 7. Learning Path: What to Learn Next
 
-| Stage                  | Content                                                                         | Priority  |
-| ---------------------- | ------------------------------------------------------------------------------- | --------- |
-| 1. Get it running      | run the 3 cells with the corrected code                                         | must      |
-| 2. Understand          | answer: how is the label created? what does predict_proba return?               | must      |
-| 3. Verify              | run the histogram in 6.5 and check whether the feature helps                    | important |
+| Stage                  | Content                                                                             | Priority  |
+| ---------------------- | ----------------------------------------------------------------------------------- | --------- |
+| 1. Get it running      | run the 3 cells with the corrected code                                             | must      |
+| 2. Understand          | answer: how is the label created? what does predict_proba return?                   | must      |
+| 3. Verify              | run the histogram in 6.5 and check whether the feature helps                        | important |
 | 4. Integrate           | add the new feature to the V2.5.2 price model, retrain, compare whether it improved | important |
-| 5. Go live (advanced)  | mirror the logic into `src/features.py` + `src/predict_system.py`               | advanced  |
-| 6. Optimize (advanced) | fix the data leakage, handle class imbalance, try more features                 | advanced  |
+| 5. Go live (advanced)  | mirror the logic into `src/features.py` + `src/predict_system.py`                   | advanced  |
+| 6. Optimize (advanced) | fix the data leakage, handle class imbalance, try more features                     | advanced  |
 
 ---
 

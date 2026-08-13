@@ -54,7 +54,7 @@ To isolate the effect of the new feature, we kept **everything else the same**:
 | ------------------- | --------------------------------------------------------------------------------------- |
 | Data                | the same risk-enhanced dataset (`V2.5.1_15min_Risk_Enhanced_Dataset.csv`, 105,193 rows) |
 | Split               | the same chronological 80/20 split                                                      |
-| Hyperparameters     | the same (the Optuna best params found in V2.5.2)                                           |
+| Hyperparameters     | the same (the Optuna best params found in V2.5.2)                                       |
 | Models              | XGBoost and LightGBM, each with 2000 trees                                              |
 | **Only difference** | whether `high_volatility_prob` is included as a feature                                 |
 
@@ -106,11 +106,11 @@ This "failure" is a valuable, honest result — not every intuitively sensible f
 
 ## 5. Next Steps
 
-| Option | What to do                                                                         |
-| ------ | ---------------------------------------------------------------------------------- |
+| Option | What to do                                                                           |
+| ------ | ------------------------------------------------------------------------------------ |
 | A      | strengthen the classifier (class imbalance, more features) -> re-run the V2.5.1 test |
-| B      | accept the conclusion and move on to other features / tuning                       |
-| C      | test other candidate features using the same two-level validation method           |
+| B      | accept the conclusion and move on to other features / tuning                         |
+| C      | test other candidate features using the same two-level validation method             |
 
 ---
 
