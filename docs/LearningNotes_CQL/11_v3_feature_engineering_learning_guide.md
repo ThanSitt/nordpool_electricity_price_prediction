@@ -1,8 +1,8 @@
-# 11 Feature Engineering Learning Guide — The V3 Notebook, Explained from Zero (特征工程学习指南)
+# 11 The V3 Notebook, Explained (特征工程学习指南)
 
 > This guide teaches you **feature engineering (特征工程)** from the absolute beginning, then walks through `data/convertData/V3_15min_feature_engineering.ipynb` step by step, and finally explains **how to engineer a new nuclear-power feature (核电特征工程)**.
-> Every technical term (专业术语) is followed by its Chinese meaning (中文释义) so you can learn the English words and the concepts at the same time.
-> Related files:
+>
+> > Related files:
 >
 > - `data/convertData/V3_15min_feature_engineering.ipynb` (the notebook we analyse)
 > - `data/convertData/V2.5_15min_features.csv` (the input table)
@@ -12,11 +12,11 @@
 
 ---
 
-## Part 0 — For the Complete Beginner (给完全初学者的基础)
+## Part 0 — (给完全初学者的基础)
 
-### 0.1 What is a "feature"? (什么是"特征"?)
+### 0.1 (什么是"特征"?)
 
-A machine-learning model (机器学习模型) sees the world as a **table (表格)** with rows and columns:
+A machine-learning model sees the world as a **table (表格)** with rows and columns:
 
 | Row = one moment | Feature A | Feature B | Target |
 | ---------------- | --------- | --------- | ------ |
@@ -45,7 +45,7 @@ Imagine teaching a child (模型) to guess tomorrow's weather. You have two choi
 
 **In one sentence:** the model cannot "understand" the real world (dates, degrees, physics) — it only understands numbers. Feature engineering converts real-world knowledge into numbers the model can learn from.
 
-### 0.3 Why can't we just feed raw data? (为什么不能直接喂原始数据?)
+### 0.3(为什么不能直接喂原始数据?)
 
 1. **A timestamp (时间戳) like "2023-06-15 14:30" is just text.** The model has no idea that 14:30 is the evening peak (晚高峰) or that June is summer. We must split it into `hour`, `month`, `season`... and even better, into **cyclic features (周期特征)**.
 
