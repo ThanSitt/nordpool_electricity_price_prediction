@@ -1,0 +1,438 @@
+diff --git a/src/config.py b/src/config.py
+index e7134aa..26441ba 100644
+--- a/src/config.py
++++ b/src/config.py
+@@ -1,10 +1,13 @@
+ """Runtime configuration shared by local runs and GitHub Actions.
+ 
+-This module intentionally contains no credentials.  The price and weather
+-sources used by the live predictor are public APIs, so a clone can run without
+-creating an untracked configuration file.
++This module intentionally contains no hard-coded credentials.  The price and
++weather sources are public APIs with no key, so a clone runs out of the box.
++Fingrid's Open Data API needs a free personal key, supplied at runtime via the
++``FINGRID_API_KEY`` environment variable (GitHub Actions secret) — grid
++features are simply skipped when no key is present.
+ """
+ 
++import os
+ from pathlib import Path
+ 
+ ROOT = Path(__file__).resolve().parent.parent
+@@ -18,3 +21,26 @@ OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
+ 
+ FORECAST_HOURS = 7 * 24
+ PRICE_HISTORY_HOURS = 200
++
++# ── Fingrid Open Data (cross-border grid transmission) ─────────────────────────
++# Requires a free API key: https://data.fingrid.fi/en/instructions
++# Supply it at runtime via env var FINGRID_API_KEY (GitHub secret in CI).
++FINGRID_API_URL = 'https://data.fingrid.fi/api'
++FINGRID_API_KEY = os.environ.get('FINGRID_API_KEY', '')
++
++# Fingrid dataset IDs for Finland cross-border power flows (MW, 15-min measured).
++# Sign: positive = Finland exports. Same IDs as 15min_GridTransmission.ipynb.
++FINGRID_GRID_DATASETS = {
++    'fi_ee':         55,   # Finland <-> Estonia (Estlink 1 + 2)
++    'fi_no':         57,   # Finland <-> Norway
++    'fi_se_north':   60,   # Finland <-> Northern Sweden (SE1)
++    'fi_se_central': 61,   # Finland <-> Central Sweden (SE3)
++}
++
++# Derived grid columns (same as V3 feature engineering) + the lag features used
++# by the live-safe V3.1 model (current-period flows are NaN at forecast time).
++GRID_FLOW_COLS = ['fi_ee', 'fi_no', 'fi_se_north', 'fi_se_central',
++                  'fi_se_total', 'fi_total_net', 'fi_se_abs']
++GRID_LAG_COLS = ['fi_total_net_lag_96', 'fi_total_net_lag_672',
++                 'fi_se_total_lag_96', 'fi_se_total_lag_672',
++                 'fi_ee_lag_96', 'fi_ee_lag_672']
+diff --git a/src/features.py b/src/features.py
+index a15cefb..e8b1a97 100644
+--- a/src/features.py
++++ b/src/features.py
+@@ -139,11 +139,68 @@ class WeatherBuffer:
+         return float(fn(clean)) if clean else np.nan
+ 
+ 
++# ── grid buffer ────────────────────────────────────────────────────────────────
++
++GRID_FLOW_COLS = ['fi_ee', 'fi_no', 'fi_se_north', 'fi_se_central',
++                  'fi_se_total', 'fi_total_net', 'fi_se_abs']
++
++
++class GridBuffer:
++    """
++    Rolling store of 15-minute cross-border grid flows (MW), indexed in
++    Helsinki time.
++
++    Only MEASURED history is held here.  For a future forecast timestamp the
++    current-period flows are not published yet, so ``get`` returns NaN; the
++    lag features (lag_96 = 24h, lag_672 = 7d) remain computable from history.
++    """
++
++    def __init__(self, df: pd.DataFrame | None = None):
++        self._df = df.copy() if df is not None else pd.DataFrame()
++        if not self._df.empty:
++            if self._df.index.tz is None:
++                self._df.index = self._df.index.tz_localize(_HELSINKI)
++            else:
++                self._df.index = self._df.index.tz_convert(_HELSINKI)
++            self._df = self._df[~self._df.index.duplicated(keep='last')].sort_index()
++
++    @staticmethod
++    def _snap(ts) -> pd.Timestamp:
++        ts = pd.Timestamp(ts)
++        if ts.tzinfo is None:
++            ts = ts.tz_localize(_HELSINKI)
++        else:
++            ts = ts.tz_convert(_HELSINKI)
++        m = (ts.minute // 15) * 15
++        return ts.replace(minute=m, second=0, microsecond=0)
++
++    def _row(self, ts):
++        key = self._snap(ts)
++        if key in self._df.index:
++            return self._df.loc[key]
++        return None
++
++    def get(self, ts) -> dict:
++        """Current-period flows at ``ts``; NaN for any slot without a measurement."""
++        row = self._row(ts)
++        if row is None:
++            return {col: np.nan for col in GRID_FLOW_COLS}
++        return {col: float(row[col]) for col in GRID_FLOW_COLS}
++
++    def lag_steps(self, ts, steps: int, col: str) -> float:
++        """Value of a grid column ``steps`` x 15-min earlier (NaN if unknown)."""
++        row = self._row(ts - pd.Timedelta(minutes=15 * steps))
++        if row is None or col not in row:
++            return np.nan
++        return float(row[col])
++
++
+ # ── feature builder ────────────────────────────────────────────────────────────
+ 
+ def build_features(dt: pd.Timestamp,
+                    buf: PriceBuffer,
+-                   wx: WeatherBuffer) -> dict:
++                   wx: WeatherBuffer,
++                   grid: GridBuffer | None = None) -> dict:
+     """
+     Build a flat dict containing every possible feature for timestamp dt.
+ 
+@@ -235,4 +292,15 @@ def build_features(dt: pd.Timestamp,
+     f['price_rolling_mean_7d']  = buf.rolling_steps(dt, 672, np.mean)
+     # price_rolling_mean/std/min/max_24h shared with hourly V2 (already set above)
+ 
++    # grid transmission (V3) — current-period flows are NaN for future slots;
++    # the lag features (lag_96 = 24h, lag_672 = 7d) are computable from history.
++    g = grid.get(dt) if grid is not None else None
++    for col in GRID_FLOW_COLS:
++        f[col] = g[col] if g is not None else np.nan
++    for col, steps in (('fi_total_net', 96), ('fi_total_net', 672),
++                       ('fi_se_total', 96), ('fi_se_total', 672),
++                       ('fi_ee', 96), ('fi_ee', 672)):
++        name = f'{col}_lag_{steps}'
++        f[name] = grid.lag_steps(dt, steps, col) if grid is not None else np.nan
++
+     return f
+diff --git a/src/fetch_live.py b/src/fetch_live.py
+index a141d21..f2492b9 100644
+--- a/src/fetch_live.py
++++ b/src/fetch_live.py
+@@ -285,3 +285,105 @@ def fetch_weather(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+     if result.empty or result.isna().all().all():
+         raise RuntimeError('No weather data available for forecast features')
+     return result[_WX_COLS]
++
++
++# --- Fingrid cross-border grid transmission ------------------------------------
++
++def _fetch_fingrid_dataset(dataset_id: int, start: pd.Timestamp,
++                           end: pd.Timestamp) -> pd.Series:
++    """Fetch one Fingrid Open Data dataset as a 15-min Series in Helsinki time.
++
++    Mirrors the paging + 429-retry pattern from ``15min_GridTransmission.ipynb``.
++    Requires ``config.FINGRID_API_KEY``; raises if it is missing.
++    """
++    if not config.FINGRID_API_KEY:
++        raise RuntimeError('FINGRID_API_KEY is not set; cannot fetch grid data')
++
++    url = f'{config.FINGRID_API_URL}/datasets/{dataset_id}/data'
++    headers = {'x-api-key': config.FINGRID_API_KEY}
++    start_utc = start.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
++    end_utc = end.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
++
++    rows: list[dict] = []
++    page = 1
++    while True:
++        for attempt in range(5):
++            response = requests.get(
++                url, headers=headers,
++                params={'startTime': start_utc, 'endTime': end_utc,
++                        'format': 'json', 'pageSize': 10000, 'page': page},
++                timeout=_TIMEOUT)
++            if response.status_code == 429:
++                wait = 60 * (attempt + 1)
++                print(f'  Fingrid 429 rate limit — waiting {wait}s before retry {attempt + 1}/5 ...')
++                time.sleep(wait)
++                continue
++            response.raise_for_status()
++            break
++        else:
++            raise RuntimeError(f'Fingrid dataset {dataset_id} page {page}: still 429 after 5 retries')
++        body = response.json()
++        batch = body.get('data', [])
++        rows.extend(batch)
++        if len(batch) < 10000:
++            break
++        page += 1
++        time.sleep(2)
++
++    if not rows:
++        return pd.Series(dtype=float, name='value')
++
++    records = {}
++    for row in rows:
++        try:
++            ts = pd.to_datetime(row['startTime'], utc=True).tz_convert(_HELSINKI)
++            records[ts] = float(row['value'])
++        except (KeyError, TypeError, ValueError):
++            continue
++    series = pd.Series(records, name='value', dtype=float).sort_index()
++    return series[~series.index.duplicated(keep='last')]
++
++
++def fetch_grid_transmission(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
++    """Return the 7 derived cross-border flow columns at 15-min resolution.
++
++    Fetches the four measured corridors (EE/NO/SE1/SE3), derives the combined
++    Sweden total, the total net flow, and the SE absolute value — matching the
++    columns used in ``V3_15min_feature_engineering.ipynb``.
++    """
++    start, end = _to_helsinki(start), _to_helsinki(end)
++
++    raw: dict[str, pd.Series] = {}
++    for name, dataset_id in config.FINGRID_GRID_DATASETS.items():
++        try:
++            series = _fetch_fingrid_dataset(dataset_id, start, end)
++        except Exception as exc:
++            print(f'  WARNING: Fingrid grid fetch failed for {name} (dataset {dataset_id}): {exc}')
++            series = pd.Series(dtype=float)
++        if series.empty:
++            print(f'  WARNING: no grid data for {name} (dataset {dataset_id})')
++        raw[name] = series
++
++    if not raw or all(s.empty for s in raw.values()):
++        return pd.DataFrame(columns=config.GRID_FLOW_COLS)
++
++    # union of all timestamps, then forward-fill small gaps onto a 15-min grid
++    index = pd.DatetimeIndex(
++        sorted({ts for s in raw.values() for ts in s.index})).tz_convert(_HELSINKI)
++    frame = pd.DataFrame(index=index, dtype=float)
++    for name, series in raw.items():
++        frame[name] = series.reindex(index)
++    frame = frame.ffill().bfill()
++
++    grid_15 = frame.resample('15min').last()
++    grid_15 = grid_15[~grid_15.index.duplicated(keep='last')]
++
++    result = pd.DataFrame(index=grid_15.index)
++    result['fi_ee'] = grid_15['fi_ee']
++    result['fi_no'] = grid_15['fi_no']
++    result['fi_se_north'] = grid_15['fi_se_north']
++    result['fi_se_central'] = grid_15['fi_se_central']
++    result['fi_se_total'] = grid_15['fi_se_north'] + grid_15['fi_se_central']
++    result['fi_total_net'] = grid_15[['fi_ee', 'fi_no', 'fi_se_north', 'fi_se_central']].sum(axis=1)
++    result['fi_se_abs'] = result['fi_se_total'].abs()
++    return result[config.GRID_FLOW_COLS]
+diff --git a/src/predict_system.py b/src/predict_system.py
+index 6b05c90..10da9a4 100644
+--- a/src/predict_system.py
++++ b/src/predict_system.py
+@@ -43,13 +43,14 @@ def load_models() -> dict:
+ 
+ def run_forecast(model, feature_cols: list[str], step_min: int,
+                  start_dt: pd.Timestamp, price_buf: feat_lib.PriceBuffer,
+-                 wx_buf: feat_lib.WeatherBuffer) -> list[tuple[pd.Timestamp, float]]:
++                 wx_buf: feat_lib.WeatherBuffer,
++                 grid_buf: feat_lib.GridBuffer | None = None) -> list[tuple[pd.Timestamp, float]]:
+     """Recursively produce seven days of predictions at ``step_min`` resolution."""
+     step = pd.Timedelta(minutes=step_min)
+     results: list[tuple[pd.Timestamp, float]] = []
+     for i in range(FORECAST_HOURS * (60 // step_min)):
+         timestamp = start_dt + i * step
+-        features = feat_lib.build_features(timestamp, price_buf, wx_buf)
++        features = feat_lib.build_features(timestamp, price_buf, wx_buf, grid_buf)
+         row = pd.DataFrame([{column: features.get(column, np.nan) for column in feature_cols}])[feature_cols]
+         prediction = float(model.predict(row)[0])
+         price_buf.add(timestamp, prediction)
+@@ -141,6 +142,20 @@ def main() -> None:
+     print(f'  got {len(weather_df)} hourly weather records')
+     weather_buf = feat_lib.WeatherBuffer(weather_df)
+ 
++    # Cross-border grid flows (V3.1 models). Best-effort: needs FINGRID_API_KEY.
++    # History window covers the 7-day lag needed by grid features.
++    print(f'Fetching grid transmission {history_start:%Y-%m-%d} → {predict_start:%Y-%m-%d} ...')
++    grid_buf: feat_lib.GridBuffer | None = None
++    if config.FINGRID_API_KEY:
++        try:
++            grid_df = fetch_live.fetch_grid_transmission(history_start, predict_start)
++            grid_buf = feat_lib.GridBuffer(grid_df)
++            print(f'  got {len(grid_df)} grid records')
++        except Exception as exc:
++            print(f'  WARNING: grid fetch failed ({exc}); grid-feature models will be skipped')
++    else:
++        print('  no FINGRID_API_KEY — grid-feature models will be skipped')
++
+     print('\nLoading models ...')
+     models = load_models()
+     if not models:
+@@ -149,6 +164,10 @@ def main() -> None:
+     print('\nGenerating seven-day forecasts ...')
+     run_day = now.normalize()
+     for model_name, meta in models.items():
++        needs_grid = any(c.startswith('fi_') for c in meta['feature_cols'])
++        if needs_grid and grid_buf is None:
++            print(f'  [skip] {model_name}: needs grid features but no grid data available')
++            continue
+         step_min = int(meta['step_min'])
+         frame = fill_actuals(load_csv(model_name), actual_prices, step_min)
+         # A manual retry replaces this day's rows rather than duplicating them.
+@@ -157,7 +176,7 @@ def main() -> None:
+ 
+         price_buf = feat_lib.PriceBuffer(_history_for_model(actual_prices, step_min))
+         predictions = run_forecast(meta['model'], meta['feature_cols'], step_min,
+-                                   predict_start, price_buf, weather_buf)
++                                   predict_start, price_buf, weather_buf, grid_buf)
+         new_rows = pd.DataFrame([
+             {
+                 'run_date': now,
+diff --git a/tests/test_features.py b/tests/test_features.py
+index 585fceb..4618574 100644
+--- a/tests/test_features.py
++++ b/tests/test_features.py
+@@ -30,5 +30,59 @@ class WeatherBufferTests(unittest.TestCase):
+         self.assertEqual(self.buffer.rolling_minutes(self.timestamp, 60, np.mean), 24.0)
+ 
+ 
++class GridBufferTests(unittest.TestCase):
++    def setUp(self):
++        index = pd.date_range('2026-01-01 00:00', periods=8, freq='15min', tz='Europe/Helsinki')
++        df = pd.DataFrame({
++            'fi_ee':        np.arange(8, dtype=float),
++            'fi_no':        np.full(8, 100.0),
++            'fi_se_north':  np.full(8, 200.0),
++            'fi_se_central': np.full(8, 300.0),
++            'fi_se_total':  np.full(8, 500.0),
++            'fi_total_net': np.full(8, 700.0),
++            'fi_se_abs':    np.full(8, 500.0),
++        }, index=index)
++        self.buffer = features.GridBuffer(df)
++        self.ts = index[6]
++
++    def test_get_returns_current_period_flows(self):
++        flows = self.buffer.get(self.ts)
++        self.assertEqual(flows['fi_ee'], 6.0)
++        self.assertEqual(flows['fi_no'], 100.0)
++
++    def test_get_returns_nan_for_future_slot(self):
++        flows = self.buffer.get(self.ts + pd.Timedelta(hours=1))
++        self.assertTrue(np.isnan(flows['fi_ee']))
++
++    def test_lag_steps_uses_preceding_slots(self):
++        # lag_4 = 4 x 15min = 1 hour earlier -> the slot at index 2
++        self.assertEqual(self.buffer.lag_steps(self.ts, 4, 'fi_ee'), 2.0)
++        # lag_96 = 24h earlier -> outside the 2h buffer -> NaN
++        self.assertTrue(np.isnan(self.buffer.lag_steps(self.ts, 96, 'fi_total_net')))
++
++    def _features(self, grid):
++        price_idx = pd.date_range('2026-01-01 00:00', periods=200, freq='15min', tz='Europe/Helsinki')
++        prices = pd.Series(10.0, index=price_idx)
++        wx_idx = pd.date_range('2026-01-01 00:00', periods=48, freq='h', tz='Europe/Helsinki')
++        wx = pd.DataFrame({'temp': 5.0, 'wind_speed': 2.0, 'wind_direction_deg': 180.0}, index=wx_idx)
++        return features.build_features(self.ts, features.PriceBuffer(prices),
++                                       features.WeatherBuffer(wx), grid)
++
++    def test_build_features_returns_nan_grid_without_buffer(self):
++        f = self._features(None)
++        self.assertTrue(np.isnan(f['fi_ee']))
++        self.assertTrue(np.isnan(f['fi_total_net_lag_672']))
++        self.assertTrue(np.isnan(f['fi_se_total_lag_96']))
++
++    def test_build_features_with_grid_provides_flows_and_lags(self):
++        f = self._features(self.buffer)
++        self.assertEqual(f['fi_ee'], 6.0)                          # current period from history
++        self.assertEqual(f['fi_se_total'], 500.0)
++        self.assertEqual(f['fi_total_net'], 700.0)
++        # grid lags are 96/672 steps (24h / 7d), outside the 2h buffer -> NaN
++        self.assertTrue(np.isnan(f['fi_total_net_lag_96']))
++        self.assertTrue(np.isnan(f['fi_ee_lag_672']))
++
++
+ if __name__ == '__main__':
+     unittest.main()
+diff --git a/tests/test_fetch_live.py b/tests/test_fetch_live.py
+index 92dc8e2..5c2f1a2 100644
+--- a/tests/test_fetch_live.py
++++ b/tests/test_fetch_live.py
+@@ -51,5 +51,59 @@ class FetchPriceTests(unittest.TestCase):
+             fetch_live.fetch_prices(self.start, self.start + pd.Timedelta(hours=6))
+ 
+ 
++class _GridResponse:
++    """Minimal stand-in for a Fingrid API response."""
++
++    def __init__(self, rows, status=200):
++        self._rows = rows
++        self.status_code = status
++
++    def raise_for_status(self):
++        if self.status_code >= 400:
++            raise RuntimeError(f'HTTP {self.status_code}')
++
++    def json(self):
++        return {'data': self._rows}
++
++
++class FetchGridTests(unittest.TestCase):
++    def setUp(self):
++        self.start = pd.Timestamp('2026-07-10 00:00', tz='Europe/Helsinki')
++
++    @patch('fetch_live.config.FINGRID_API_KEY', 'test-key')
++    @patch('fetch_live.requests.get')
++    def test_fetch_grid_derives_flow_columns(self, get):
++        # one page of 4 quarter-hour rows per dataset (IDs 55/57/60/61)
++        values = {55: 10.0, 57: 20.0, 60: 30.0, 61: 40.0}
++
++        def fake_get(url, headers=None, params=None, timeout=None):
++            dataset_id = int(url.split('/datasets/')[1].split('/')[0])
++            rows = [{
++                'startTime': (self.start + pd.Timedelta(minutes=15 * i))
++                             .tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ'),
++                'value': values[dataset_id],
++            } for i in range(4)]
++            return _GridResponse(rows)
++
++        get.side_effect = fake_get
++
++        result = fetch_live.fetch_grid_transmission(
++            self.start, self.start + pd.Timedelta(hours=1))
++
++        for col in ['fi_ee', 'fi_no', 'fi_se_north', 'fi_se_central',
++                    'fi_se_total', 'fi_total_net', 'fi_se_abs']:
++            self.assertIn(col, result.columns)
++        self.assertAlmostEqual(result['fi_total_net'].iloc[0], 100.0)  # 10+20+30+40
++        self.assertAlmostEqual(result['fi_se_total'].iloc[0], 70.0)    # 30+40
++        self.assertAlmostEqual(result['fi_se_abs'].iloc[0], 70.0)
++        self.assertEqual(str(result.index.tz), 'Europe/Helsinki')
++
++    @patch('fetch_live.config.FINGRID_API_KEY', '')
++    def test_fetch_grid_raises_without_api_key(self):
++        with self.assertRaisesRegex(RuntimeError, 'FINGRID_API_KEY is not set'):
++            fetch_live._fetch_fingrid_dataset(55, self.start,
++                                              self.start + pd.Timedelta(hours=1))
++
++
+ if __name__ == '__main__':
+     unittest.main()
