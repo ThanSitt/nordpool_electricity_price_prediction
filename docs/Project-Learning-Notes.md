@@ -2,7 +2,7 @@
 
 > **Project**: Predict Finland (FI) Nord Pool day-ahead electricity spot prices (EUR/MWh) using weather data + engineered features + gradient-boosted trees.
 > **Repo**: `https://github.com/ThanSitt/nordpool_electricity_price_prediction`
-> **Last updated**: 2026-08-13
+> **Last updated**: 2026-08-14
 >
 > These notes are a deep, code-grounded companion to the `README.md`. The README is the quick reference; this document explains _why_ each piece exists, how the system works end-to-end, what has been tried, and what is currently broken or unexplored.
 
@@ -10,7 +10,9 @@
 
 ## 1. Project Overview
 
-This project predicts **Finland (FI)** Nord Pool day-ahead electricity spot prices at **two time resolutions** (hourly and 15-minute) using **two gradient-boosting algorithms** (XGBoost and LightGBM). It has evolved through **four core model versions** (V1 → V1.5 → V2 → V2.5), two controlled follow-up experiments (V2.5.1 and V2.5.2), and one in-progress extension (V3, cross-border grid transmission features).
+This project predicts **Finland (FI)** Nord Pool day-ahead electricity spot prices at **two time resolutions** (hourly and 15-minute) using **two gradient-boosting algorithms** (XGBoost and LightGBM). It has evolved through **four core model versions** (V1 → V1.5 → V2 → V2.5), several controlled follow-up experiments (V2.5.1, V2.5.2, **V2.5.3 tuned XGBoost**), and supply-side extensions: **V3** (cross-border grid) and **V4** (grid + nuclear power).
+
+**Team split (2026-08)**: a partner tunes **LightGBM**, this user tunes **XGBoost** — they share one dataset `V3.1_15min_features.csv` (V2.5 + grid + nuclear). Version numbers differ per person: partner's LightGBM "V3" = the shared dataset; the user's XGBoost **V3 = grid**, **V4 = grid + nuclear**.
 
 The system has **two independent flows** that share the same feature definition:
 
@@ -32,7 +34,7 @@ Live flow (src/):            Public APIs → Build Features → Load .pkl → Re
 - **What it predicts**: the FI Nord Pool day-ahead spot price for every 15-minute slot over the next 7 days (672 slots), in EUR/MWh.
 - **Why it matters**: day-ahead prices drive energy trading, hedging, and consumption planning. A usable forecast (MAE ≈ 2.8 EUR/MWh offline) is well within practical decision tolerance.
 - **How it is delivered**: `src/predict_system.py` runs daily and writes one CSV per model into `predictions/`. A GitHub Actions workflow runs it automatically every day at 11:00 UTC (≈13:00/14:00 Finland time, after Nord Pool publishes tomorrow's prices ~12:00 EET) and commits the updated forecasts.
-- **Educational goal**: the repository is deliberately built as a _learning_ project. `docs/LearningNotes_CQL/` contains 10 bilingual (English/Chinese) learning guides that document every concept: data cleaning, feature engineering, model training, comparison, automation, and visualization. The `.pkl` "model bundle" concept, recursive forecasting, and time-series evaluation are all explained there for a beginner audience.
+- **Educational goal**: the repository is deliberately built as a _learning_ project. `docs/LearningNotes_CQL/` contains 15 bilingual (English/Chinese) learning guides (01–15) that document every concept: data cleaning, feature engineering, model training, comparison, automation, visualization, the `src/` folder, why features can fail, and the nuclear/V4 work. The `.pkl` "model bundle" concept, recursive forecasting, and time-series evaluation are all explained there for a beginner audience.
 
 ---
 
@@ -141,14 +143,15 @@ The pipeline is a sequence of notebooks that each produce the next dataset. Each
 
 ### 6.1 Notebook → dataset chain
 
-| Notebook                               | Output                                                       | Description                                                   |
-| -------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------- |
-| `V1_data_cleaning_and_alignment.ipynb` | `V1_finland_electricity_predict_dataset.csv` (26,304 rows)   | Hourly: clean + align price/temp/wind                         |
-| `V1.5_15min_Dataset.ipynb`             | `V1.5_15min_Dataset.csv` (105,216 rows)                      | 15-min merged base (no features)                              |
-| `V2_feature_engineering.ipynb`         | `V2_finland_electricity_features.csv` (26,304 rows, 43 cols) | Hourly + engineered features                                  |
-| `V2.5_15min_feature_engineering.ipynb` | `V2.5_15min_features.csv` (105,216 rows, 51 cols)            | 15-min + engineered features (**used by training**)           |
-| `feature_high_volatility.ipynb`        | `V2.5.1_15min_Risk_Enhanced_Dataset.csv` (105,193 rows)      | Adds `high_volatility_prob` (experiment, rejected)            |
-| `V3_15min_feature_engineering.ipynb`   | `V3_15min_features.csv` (105,216 rows, 61 cols)              | V2.5 + cross-border grid flows (**experiment, no model yet**) |
+| Notebook                               | Output                                                       | Description                                                                         |
+| -------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `V1_data_cleaning_and_alignment.ipynb` | `V1_finland_electricity_predict_dataset.csv` (26,304 rows)   | Hourly: clean + align price/temp/wind                                               |
+| `V1.5_15min_Dataset.ipynb`             | `V1.5_15min_Dataset.csv` (105,216 rows)                      | 15-min merged base (no features)                                                    |
+| `V2_feature_engineering.ipynb`         | `V2_finland_electricity_features.csv` (26,304 rows, 43 cols) | Hourly + engineered features                                                        |
+| `V2.5_15min_feature_engineering.ipynb` | `V2.5_15min_features.csv` (105,216 rows, 51 cols)            | 15-min + engineered features (**used by training**)                                 |
+| `feature_high_volatility.ipynb`        | `V2.5.1_15min_Risk_Enhanced_Dataset.csv` (105,193 rows)      | Adds `high_volatility_prob` (experiment, rejected)                                  |
+| `V3_15min_feature_engineering.ipynb`   | `V3_15min_features.csv` (105,216 rows, 64 cols)              | V2.5 + cross-border grid flows (trains XGBoost V3)                                  |
+| `V3.1_15min_feature_engineering.ipynb` | `V3.1_15min_features.csv` (105,216 rows, 70 cols)            | **Shared dataset**: V2.5 + grid + nuclear (trains XGBoost V4 / partner LightGBM V3) |
 
 ### 6.2 Data cleaning & alignment steps (from `V1_data_cleaning_and_alignment.ipynb`)
 
@@ -273,23 +276,30 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
         │                                   │
         └─────────── feature engineering ───┘
                          │
-                V2 (hourly, engineered) ──→ V2.5 (15-min, engineered) ★ best
+                V2 (hourly, engineered) ──→ V2.5 (15-min, engineered)
                          │                              │
                  (fair tuning)                  (risk feature test)
                          │                              │
                  V2.5.2 (Optuna both)          V2.5.1 (high_volatility_prob)
                          │
-                 V3 (grid flows — in progress, no model yet)
+                 V2.5.3 (XGBoost, Optuna 30) ★ best production XGBoost
+                         │
+        ┌────────────────┴───────────────────┐
+   V3 = + grid (XGBoost)          V4 = + grid + nuclear (XGBoost) ★ best overall
+        (V3_15min_features.csv)   (V3.1_15min_features.csv, shared with partner)
 ```
 
 ### 9.2 Per-version summary
 
-| Model    | Resolution | Features                   | Train rows | Test MAE | RMSE     | R²        | Note                             |
-| -------- | ---------- | -------------------------- | ---------- | -------- | -------- | --------- | -------------------------------- |
-| **V1**   | Hourly     | Weather only (temp, wind)  | ~21k       | 33.13    | 46.34    | 0.107     | Baseline                         |
-| **V1.5** | 15-min     | Weather only (+ direction) | ~84k       | 32.19    | 45.78    | 0.125     | Resolution alone ≈ no gain       |
-| **V2**   | Hourly     | Full engineered            | ~21k       | 7.22     | 14.62    | 0.911     | Feature engineering breakthrough |
-| **V2.5** | 15-min     | Full engineered            | ~84k       | **2.82** | **8.22** | **0.972** | **Best model**                   |
+| Model            | Features        | Train rows | Test MAE   | RMSE       | R²         | Note                                   |
+| ---------------- | --------------- | ---------- | ---------- | ---------- | ---------- | -------------------------------------- |
+| **V1**           | 2 (weather)     | ~21k       | 33.13      | 46.34      | 0.107      | Hourly baseline                        |
+| **V1.5**         | 5 (weather)     | ~84k       | 32.19      | 45.78      | 0.125      | Resolution alone ≈ no gain             |
+| **V2**           | 41 (engineered) | ~21k       | 7.22       | 14.62      | 0.911      | Feature engineering breakthrough       |
+| **V2.5**         | 49 (engineered) | ~84k       | 2.82       | 8.22       | 0.972      | Default XGBoost                        |
+| **V2.5.3**       | 49 (engineered) | ~84k       | 2.7236     | 8.1642     | 0.9722     | **XGBoost + Optuna 30** (production)   |
+| **V3** (XGBoost) | 62 (+13 grid)   | ~84k       | 2.7152     | 8.0699     | 0.9728     | Grid helps under tuned model           |
+| **V4** (XGBoost) | 68 (+6 nuclear) | ~84k       | **2.6993** | **8.0321** | **0.9731** | **Best XGBoost so far** (grid+nuclear) |
 
 ### 9.3 Why V2.5 wins
 
@@ -307,16 +317,22 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
 
 ## 10. Experiment History
 
-| #   | Experiment             | Notebook                                              | Setup                                                  | Result                                            | Verdict                                        |
-| --- | ---------------------- | ----------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------- | ---------------------------------------------- |
-| 1   | V1 baseline            | `xgboost_models/modelV1.ipynb`                        | Hourly, weather only                                   | MAE 33.13 / RMSE 46.34 / R² 0.107                 | Baseline                                       |
-| 2   | V1.5 resolution test   | `xgboost_models/modelV1.5.ipynb`                      | 15-min, weather only                                   | MAE 32.19 / R² 0.125                              | Resolution alone ≈ no gain                     |
-| 3   | V2 feature engineering | `xgboost_models/modelV2.ipynb`                        | Hourly, engineered                                     | MAE 7.22 / R² 0.911                               | Breakthrough                                   |
-| 4   | V2.5 best model        | `xgboost_models/modelV2.5.ipynb`                      | 15-min, engineered                                     | MAE 2.82 / RMSE 8.22 / R² 0.972                   | **Best**                                       |
-| 5   | LightGBM V2 & V2.5     | `lightgbm_models/modelV2*.ipynb`                      | Same data, Optuna-tuned LightGBM                       | Slightly better than XGBoost                      | LightGBM tuned ≈ wins                          |
-| 6   | V2.5.2 fair comparison | `xgboost_models/modelV2.5.2.ipynb`                    | Both Optuna-tuned, MAE loss, 2000 trees, 10×5-fold TSS | XGB MAE 2.7652; **LGBM MAE 2.7167**               | LightGBM ~1.8% better; much closer than before |
-| 7   | V2.5.1 risk feature    | `xgboost_models/modelV2.5.1.ipynb`                    | ± `high_volatility_prob`, same data/split/params       | Both models got ~1% **worse**                     | Feature rejected                               |
-| 8   | V3 grid features       | `data/convertData/V3_15min_feature_engineering.ipynb` | V2.5 + Fingrid cross-border flows                      | Dataset built (61 cols); **no model trained yet** | In progress                                    |
+| #   | Experiment                | Notebook                                                | Setup                                                  | Result                                                | Verdict                                             |
+| --- | ------------------------- | ------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------- |
+| 1   | V1 baseline               | `xgboost_models/modelV1.ipynb`                          | Hourly, weather only                                   | MAE 33.13 / RMSE 46.34 / R² 0.107                     | Baseline                                            |
+| 2   | V1.5 resolution test      | `xgboost_models/modelV1.5.ipynb`                        | 15-min, weather only                                   | MAE 32.19 / R² 0.125                                  | Resolution alone ≈ no gain                          |
+| 3   | V2 feature engineering    | `xgboost_models/modelV2.ipynb`                          | Hourly, engineered                                     | MAE 7.22 / R² 0.911                                   | Breakthrough                                        |
+| 4   | V2.5 best model           | `xgboost_models/modelV2.5.ipynb`                        | 15-min, engineered                                     | MAE 2.82 / RMSE 8.22 / R² 0.972                       | **Best**                                            |
+| 5   | LightGBM V2 & V2.5        | `lightgbm_models/modelV2*.ipynb`                        | Same data, Optuna-tuned LightGBM                       | Slightly better than XGBoost                          | LightGBM tuned ≈ wins                               |
+| 6   | V2.5.2 fair comparison    | `xgboost_models/modelV2.5.2.ipynb`                      | Both Optuna-tuned, MAE loss, 2000 trees, 10×5-fold TSS | XGB MAE 2.7652; **LGBM MAE 2.7167**                   | LightGBM ~1.8% better; much closer than before      |
+| 7   | V2.5.1 risk feature       | `xgboost_models/modelV2.5.1.ipynb`                      | ± `high_volatility_prob`, same data/split/params       | Both models got ~1% **worse**                         | Feature rejected                                    |
+| 8   | V3 grid features          | `data/convertData/V3_15min_feature_engineering.ipynb`   | V2.5 + Fingrid cross-border flows                      | Dataset built (64 cols); default model slightly worse | grid helps only after tuning                        |
+| 9   | **V2.5.3 XGBoost Optuna** | `xgboost_models/modelV2.5.3.ipynb`                      | MAE loss, 30 trials × 5-fold TS-CV, 2000 trees         | MAE 2.7236 / RMSE 8.1642 / R² 0.9722                  | **Tuning > new features** — best production XGBoost |
+| 10  | V2.5.1.1 risk re-test     | `xgboost_models/modelV2.5.1.1.ipynb`                    | risk feature under TUNED model                         | +0.0045 (still worse, smaller)                        | Risk feature robustly rejected                      |
+| 11  | V3.1 grid re-test         | `xgboost_models/modelV3.1.ipynb`                        | grid under TUNED model                                 | −0.0084 (helps)                                       | **Tune first, then test features**                  |
+| 12  | V3.1_live (grid lags)     | `xgboost_models/modelV3.1_live.ipynb`                   | lag-only grid (55), live-feasible                      | +0.0180 (hurts)                                       | Grid NOT deployable (train/serve gap)               |
+| 13  | Nuclear + V3.1 dataset    | `data/convertData/V3.1_15min_feature_engineering.ipynb` | V3 + 6 nuclear features (shared dataset)               | `V3.1_15min_features.csv` (70 cols)                   | Shared with partner (his LightGBM "V3")             |
+| 14  | **XGBoost V4**            | `xgboost_models/modelV4.ipynb`                          | V3 + nuclear, tuned params                             | **MAE 2.6993 / RMSE 8.0321 / R² 0.9731** (Δ−0.0159)   | **Best XGBoost so far** — nuclear helps             |
 
 ### 10.1 V2.5.2 details (fair XGBoost vs LightGBM)
 
@@ -378,7 +394,7 @@ One CSV per model (`<name>_forecasts.csv`) with columns: `run_date`, `target_dat
 
 - `README.md` — quick reference.
 - `docs/Project-Learning-Notes.md` — **this file**.
-- `docs/LearningNotes_CQL/*.md` — 10 bilingual learning guides (roadmap, training, cleaning, feature engineering, V1.5 plan, comparison+automation, high-volatility classifier, training→automation mental model, V2.5.1 experiment, visualization).
+- `docs/LearningNotes_CQL/*.md` — 15 bilingual learning guides (01–15): roadmap, training, cleaning, feature engineering, V1.5 plan, comparison+automation, high-volatility classifier, training→automation mental model, V2.5.1 experiment, visualization, `src/` folder, why features fail + Optuna, grid revert record, nuclear/V4.
 - `.github/workflows/daily_forecast.yml` — daily automation.
 
 ---
@@ -441,12 +457,15 @@ schedule: cron '0 11 * * *' (UTC)  # ≈ 13:00/14:00 Finland, after price public
 
 ## 13. Current Project Status
 
-- **8 trained models** live in `models/saved/` (4 XGBoost + 4 LightGBM, including the two V2.5.2 fair-comparison models), all consumed by the live predictor.
-- **Daily forecasts are running and committing automatically** (git history shows `forecast: YYYY-MM-DD daily update` commits; last run 2026-08-12).
-- **Best model**: XGBoost V2.5 (offline test MAE 2.82 / RMSE 8.22 / R² 0.972).
-- **Active experiment**: V3 grid-transmission dataset (`V3_15min_features.csv`, 61 cols) built from Fingrid; **no V3 model trained yet**.
-- **Unit tests** pass and are enforced in CI before every forecast run.
-- **Branch**: `chenqi` is the active development branch (main = production). Learning notes were recently moved from `xgboost_models/LearningNotes_CQL/` to `docs/LearningNotes_CQL/` (working tree shows the old paths deleted and `docs/` untracked — the move is staged/committed on the dev branch).
+- **9 trained models** live in `models/saved/` (now including `xgboost_v2_5_3.pkl` — the Optuna-tuned XGBoost), all consumed by the live predictor.
+- **Experiment models** in `models/experiments/`: `xgboost_v3.pkl`, `xgboost_v4.pkl`, `xgboost_v3_1.pkl` (grid/nuclear features NOT in the live pipeline, so kept out of `models/saved/`).
+- **Daily forecasts are running and committing automatically** (git history shows `forecast: YYYY-MM-DD daily update` commits).
+- **Best production model**: XGBoost V2.5.3 (MAE 2.7236 / RMSE 8.1642 / R² 0.9722).
+- **Best overall (experiment)**: **XGBoost V4** — grid + nuclear (MAE 2.6993 / R² 0.9731), trained on the shared `V3.1_15min_features.csv`.
+- **Nuclear data done**: `data/originalData/Nuclear/nuclear_measured_15min.csv` (105,216 rows, Fingrid dataset 188).
+- **Grid → src integration REVERTED** (2026-08-14): records in `docs/LearningNotes_CQL/14_grid_src_integration_reverted.md` + `grid_src_integration.patch`.
+- **Unit tests** pass (7) and are enforced in CI before every forecast run.
+- **Team split**: partner = LightGBM (shared dataset = his "V3"); this user = XGBoost only (V3 = grid, V4 = grid + nuclear).
 
 ---
 
@@ -495,6 +514,10 @@ Earlier price data came from Fingrid dataset 105 (down-regulation bid volume, MW
 - V3 grid sign convention (positive = exports) is stated but should be re-verified against the Fingrid catalog before trusting the model.
 - The 8-row NaN back-fill at the start of `grid_transmission_15min.csv` is a one-off hack (documented, negligible impact).
 
+### 14.8 Grid & nuclear features are NOT in the live pipeline (by design)
+
+`models/saved/` contains no model with `fi_*` or `nuclear_*` features — `src/features.py` does not build them. The grid→`src/` integration was attempted and **reverted** (records in `docs/LearningNotes_CQL/14_*`). The V3/V4 models live only in `models/experiments/` until the pipeline is extended. This is intentional: naive integration would silently produce NaN features for those columns in live forecasts.
+
 ---
 
 ## 15. Future Improvements
@@ -527,7 +550,7 @@ Earlier price data came from Fingrid dataset 105 (down-regulation bid volume, MW
 
 ## 16. Learning Notes
 
-The following lessons are captured in depth in `docs/LearningNotes_CQL/` (bilingual guides). Highlights:
+The following lessons are captured in depth in `docs/LearningNotes_CQL/` (bilingual guides 01–15). Highlights:
 
 1. **Baseline before models** — always build a naive/linear baseline to know if the real model beats a simple guess.
 2. **Time-series evaluation** — split chronologically, never shuffle; test on the most recent period the model hasn't seen.
@@ -539,3 +562,7 @@ The following lessons are captured in depth in `docs/LearningNotes_CQL/` (biling
 8. **Controlled experiments give honest answers** — the V2.5.1 "failure" (feature made things worse) is as valuable as any win; a feature can carry signal yet still hurt a model.
 9. **Fair comparisons matter** — V2.5.2 showed that tuning XGBoost closed most of the gap with Optuna-tuned LightGBM; the original comparison was unfair (default vs tuned).
 10. **Live ≠ offline** — recursive forecasting compounds error, and price regimes drift; always validate on live rolling predictions, not just the held-out test set.
+11. **Tune first, then test features** (guide 12) — Optuna tuning improved XGBoost more than adding 13 grid features ever did; the V3/V3.1 experiments flipped from "worse" to "better" after tuning.
+12. **Train/serve gap** (guides 13–15) — the part of a feature that helps in training (current-period flows) is often NOT available at live forecast time; only lag/forward-known features are deployable.
+13. **Real supply-side signals help; noise features don't** (guide 15) — nuclear power (real, stable) improved XGBoost V4 to MAE 2.6993, while the weak-classifier "high_volatility_prob" did not.
+14. **Live ≠ offline** — recursive forecasting compounds error, and price regimes drift; always validate on live rolling predictions, not just the held-out test set.
