@@ -34,7 +34,7 @@ Live flow (src/):            Public APIs → Build Features → Load .pkl → Re
 - **What it predicts**: the FI Nord Pool day-ahead spot price for every 15-minute slot over the next 7 days (672 slots), in EUR/MWh.
 - **Why it matters**: day-ahead prices drive energy trading, hedging, and consumption planning. A usable forecast (MAE ≈ 2.8 EUR/MWh offline) is well within practical decision tolerance.
 - **How it is delivered**: `src/predict_system.py` runs daily and writes one CSV per model into `predictions/`. A GitHub Actions workflow runs it automatically every day at 11:00 UTC (≈13:00/14:00 Finland time, after Nord Pool publishes tomorrow's prices ~12:00 EET) and commits the updated forecasts.
-- **Educational goal**: the repository is deliberately built as a _learning_ project. `docs/LearningNotes_CQL/` contains 15 bilingual (English/Chinese) learning guides (01–15) that document every concept: data cleaning, feature engineering, model training, comparison, automation, visualization, the `src/` folder, why features can fail, and the nuclear/V4 work. The `.pkl` "model bundle" concept, recursive forecasting, and time-series evaluation are all explained there for a beginner audience.
+- **Educational goal**: the repository is deliberately built as a _learning_ project. `docs/LearningNotes_CQL/` contains 16 bilingual (English/Chinese) learning guides (01–16) that document every concept: data cleaning, feature engineering, model training, comparison, automation, visualization, the `src/` folder, why features can fail, the nuclear/V4 work, and the model warehouse (saved vs experiments). The `.pkl` "model bundle" concept, recursive forecasting, and time-series evaluation are all explained there for a beginner audience.
 
 ---
 
@@ -401,7 +401,7 @@ One CSV per model (`<name>_forecasts.csv`) with columns: `run_date`, `target_dat
 
 - `README.md` — quick reference.
 - `docs/Project-Learning-Notes.md` — **this file**.
-- `docs/LearningNotes_CQL/*.md` — 15 bilingual learning guides (01–15): roadmap, training, cleaning, feature engineering, V1.5 plan, comparison+automation, high-volatility classifier, training→automation mental model, V2.5.1 experiment, visualization, `src/` folder, why features fail + Optuna, grid revert record, nuclear/V4.
+- `docs/LearningNotes_CQL/*.md` — 16 bilingual learning guides (01–16): roadmap, training, cleaning, feature engineering, V1.5 plan, comparison+automation, high-volatility classifier, training→automation mental model, V2.5.1 experiment, visualization, `src/` folder, why features fail + Optuna, grid revert record, nuclear/V4, models/ folder (saved vs experiments).
 - `.github/workflows/daily_forecast.yml` — daily automation.
 
 ---
@@ -560,7 +560,7 @@ On this branch (`chenqi`), `models/saved/` contains no model with `fi_*` or `nuc
 
 ## 16. Learning Notes
 
-The following lessons are captured in depth in `docs/LearningNotes_CQL/` (bilingual guides 01–15). Highlights:
+The following lessons are captured in depth in `docs/LearningNotes_CQL/` (bilingual guides 01–16). Highlights:
 
 1. **Baseline before models** — always build a naive/linear baseline to know if the real model beats a simple guess.
 2. **Time-series evaluation** — split chronologically, never shuffle; test on the most recent period the model hasn't seen.
