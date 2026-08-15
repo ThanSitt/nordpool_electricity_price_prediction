@@ -7,9 +7,11 @@ Predict Finland (FI) Nord Pool day-ahead electricity prices using weather data a
 ## Table of Contents
 
 - [Project Overview](#project-overview)
-- [Four Model Versions](#four-model-versions)
+- [Model Versions](#model-versions)
+- [Project Timeline (Gantt)](#project-timeline-gantt)
 - [Project Structure](#project-structure)
 - [XGBoost vs LightGBM](#xgboost-vs-lightgbm)
+- [V2.5.2 & V2.5.1 Experiments](#v252--v251-experiments)
 - [Live Prediction Automation](#live-prediction-automation)
 - [How to Run](#how-to-run)
 - [Dependencies](#dependencies)
@@ -18,7 +20,7 @@ Predict Finland (FI) Nord Pool day-ahead electricity prices using weather data a
 
 ## Project Overview
 
-This project predicts Finnish electricity spot prices using temperature, wind speed, and wind direction data. It covers two resolutions (hourly and 15-minute) and four model versions, showing how feature engineering and temporal granularity affect prediction accuracy.
+This project predicts Finnish electricity spot prices using temperature, wind speed, wind direction, cross-border grid flows, and nuclear output data. It covers two resolutions (hourly and 15-minute) and a family of XGBoost/LightGBM models (V1 → V2.5.3 → V3/V4 experiments), showing how feature engineering, hyperparameter tuning, and supply-side data affect prediction accuracy.
 
 The pipeline has two main flows:
 
@@ -29,20 +31,56 @@ Live:       APIs → Build Features → Load Saved Model → Predict 7 Days → 
 
 ---
 
-## Four Model Versions
+## Model Versions
 
-| Model    | Resolution | Features                                           | RMSE     | R²        | Description                          |
-| -------- | ---------- | -------------------------------------------------- | -------- | --------- | ------------------------------------ |
-| V1       | Hourly     | Weather only (temp, wind)                          | 46.34    | 0.107     | Baseline — weather-only hourly model |
-| V1.5     | 15-min     | Weather only (temp, wind, direction)               | 45.78    | 0.125     | 15-min baseline — weather only       |
-| V2       | Hourly     | Full engineered (lags, rolling, calendar, holiday) | 14.62    | 0.911     | Hourly + feature engineering         |
-| **V2.5** | **15-min** | **Full engineered**                                | **8.22** | **0.972** | **Best model — highest accuracy**    |
+| Model            | Features                                           | Test MAE   | RMSE       | R²         | Description                           |
+| ---------------- | -------------------------------------------------- | ---------- | ---------- | ---------- | ------------------------------------- |
+| V1               | Weather only (temp, wind)                          | 33.13      | 46.34      | 0.107      | Hourly weather-only baseline          |
+| V1.5             | Weather only (temp, wind, direction)               | 32.19      | 45.78      | 0.125      | 15-min weather-only baseline          |
+| V2               | Full engineered (lags, rolling, calendar, holiday) | 7.22       | 14.62      | 0.911      | Hourly + feature engineering          |
+| V2.5             | Full engineered (49)                               | 2.82       | 8.22       | 0.972      | 15-min + engineered (default XGBoost) |
+| **V2.5.3**       | Full engineered (49), **Optuna-tuned**             | **2.7236** | **8.1642** | **0.9722** | **Best production XGBoost**           |
+| V3 (XGBoost)     | + grid flows (62) — experiment                     | 2.7152     | 8.0699     | 0.9728     | Grid helps under tuned model          |
+| **V4 (XGBoost)** | + grid + nuclear (68) — experiment                 | **2.6993** | **8.0321** | **0.9731** | **Best overall — not yet live**       |
 
 ### Key Findings
 
 1. **Higher resolution alone (V1 → V1.5) barely helps** — R² 0.107 → 0.125. More rows of weak features don't help.
 2. **Feature engineering (V1 → V2) is the real breakthrough** — R² 0.107 → 0.911. Lag features, rolling statistics, and calendar features capture the autoregressive nature of electricity prices.
 3. **Both combined (V2 → V2.5) gives the best result** — R² 0.911 → 0.972, RMSE drops from 14.62 to 8.22.
+4. **Then tuning beats more features** — Optuna tuning (V2.5.3) beat adding grid features alone (V3). Adding real supply-side data (nuclear) gives V4, the best XGBoost so far (MAE 2.6993), but it is **not** in the live pipeline yet.
+
+---
+
+## Project Timeline (Gantt)
+
+```mermaid
+gantt
+    title Nordpool FI Price Prediction — Evolution Timeline
+    dateFormat  YYYY-MM
+    axisFormat  %Y-%m
+
+    section Data Pipeline
+        V1 hourly clean+align        :2023-10, 1M
+        V1.5 15-min merge            :2024-01, 1M
+        V2 hourly features           :2024-03, 1M
+        V2.5 15-min features         :2024-06, 1M
+        V3 grid features             :2026-07, 1M
+        V3.1 grid+nuclear (shared)   :2026-08, 1M
+
+    section Models
+        V1/V1.5 weather-only         :2023-11, 1M
+        V2/V2.5 engineered           :2024-06, 1M
+        V2.5.2 fair XGB vs LGBM      :2026-07, 1M
+        V2.5.3 XGBoost Optuna        :2026-08, 2w
+        V3/V3.1 grid re-test         :2026-08, 2w
+        V4 grid+nuclear              :2026-08, 2w
+
+    section Live Automation
+        src/ pipeline                :2024-08, 2M
+        GitHub Actions daily         :2024-09, 2M
+        nuclear .env secret fix      :2026-08, 1w
+```
 
 ---
 
@@ -59,10 +97,14 @@ nordpool_electricity_price_prediction/
 │   ├── originalData/
 │   │   ├── electricPrices/          ← Price CSV files
 │   │   ├── Temperature/             ← Temperature CSVs + 15-min resampling notebook
-│   │   └── WindDirection&Speed/     ← Wind CSVs + 15-min resampling notebook
+│   │   ├── WindDirection&Speed/     ← Wind CSVs + 15-min resampling notebook
+│   │   ├── GridTransmission/        ← Fingrid cross-border flows → grid_transmission_15min.csv
+│   │   └── Nuclear/                 ← Fingrid nuclear output → nuclear_measured_15min.csv
 │   └── convertData/                 ← Processed datasets
 │       ├── V1.5_15min_Dataset.csv   ← Merged 15-min data (no features)
 │       ├── V2.5_15min_features.csv  ← Feature-engineered 15-min data
+│       ├── V3_15min_features.csv    ← V2.5 + grid features (V3)
+│       ├── V3.1_15min_features.csv  ← V2.5 + grid + nuclear (V4 / shared dataset)
 │       ├── feature_high_volatility.ipynb   ← High-volatility classifier + feature (V2.5.1)
 │       └── V2.5.1_15min_Risk_Enhanced_Dataset.csv  ← V2.5 + high_volatility_prob feature
 │
@@ -70,22 +112,25 @@ nordpool_electricity_price_prediction/
 │   ├── modelV1.ipynb                ← V1: hourly, weather only
 │   ├── modelV1.5.ipynb              ← V1.5: 15-min, weather only
 │   ├── modelV2.ipynb                ← V2: hourly, engineered features
-│   ├── modelV2.5.ipynb              ← V2.5: 15-min, engineered features (best)
+│   ├── modelV2.5.ipynb              ← V2.5: 15-min, engineered features
 │   ├── modelV2.5.2.ipynb            ← V2.5.2: fair XGBoost vs LightGBM (Optuna-tuned)
-│   └── modelV2.5.1.ipynb            ← V2.5.1: controlled test of the risk feature
+│   ├── modelV2.5.1.ipynb            ← V2.5.1: controlled test of the risk feature
+│   ├── modelV2.5.3.ipynb            ← V2.5.3: Optuna-tuned XGBoost (best production)
+│   ├── modelV2.5.1.1.ipynb          ← V2.5.1.1: risk re-test under tuned model
+│   ├── modelV3.ipynb                ← V3: grid features (tuned)
+│   ├── modelV3.1.ipynb              ← V3.1: grid re-test under tuned model
+│   ├── modelV3.1_live.ipynb         ← V3.1_live: live-safe grid lags (rejected)
+│   └── modelV4.ipynb                ← V4: grid + nuclear (best, experiment)
 │
 ├── lightgbm_models/                 ← LightGBM training notebooks
 │   ├── modelV2.ipynb                ← V2: hourly + engineered
 │   └── modelV2.5.ipynb              ← V2.5: 15-min + engineered
 │
 ├── models/
-│   └── saved/                       ← Trained model files (.pkl) used by live predictor
-│       ├── xgboost_v1.pkl
-│       ├── xgboost_v1_5.pkl
-│       ├── xgboost_v2.pkl
-│       ├── xgboost_v2_5.pkl
-│       ├── lightgbm_v2.pkl
-│       └── lightgbm_v2_5.pkl
+│   ├── saved/                       ← Live predictor models (.pkl) — 9 models
+│   │   ├── xgboost_v1/v1_5/v2/v2_5/v2_5_2/v2_5_3.pkl
+│   │   └── lightgbm_v2/v2_5/v2_5_2.pkl
+│   └── experiments/                 ← Not live (grid/nuclear not in src/): xgboost_v3/v3_1/v4.pkl
 │
 ├── src/                             ← Live prediction source code
 │   ├── config.py                    ← Configuration (paths, API URLs)
@@ -101,8 +146,9 @@ nordpool_electricity_price_prediction/
 │   ├── test_fetch_live.py
 │   └── test_predict_system.py
 │
-├── notebooks/
-│   └── LearningNotes_CQL/           ← Learning notes (Chinese / English mixed)
+├── docs/
+│   ├── Project-Learning-Notes.md    ← Deep-dive project notes (16 sections)
+│   └── LearningNotes_CQL/           ← 15 bilingual learning guides (01–15)
 │
 └── .github/workflows/               ← GitHub Actions auto-run config
 ```
@@ -127,7 +173,7 @@ nordpool_electricity_price_prediction/
 
 ### In this project
 
-Both algorithms are trained on the same data with the same features. The LightGBM versions use Optuna tuning and perform slightly better. All 6 saved models are loaded and run by the live predictor every day.
+Both algorithms are trained on the same data with the same features. The LightGBM versions use Optuna tuning and perform slightly better; the best XGBoost (V2.5.3) is now Optuna-tuned too and is the best production model. All 9 saved models in `models/saved/` are loaded and run by the live predictor every day. V3/V4 (grid + nuclear) stay in `models/experiments/` until the live feature pipeline is extended.
 
 ---
 
@@ -294,7 +340,9 @@ Open and run the notebooks:
 
 - `xgboost_models/modelV1.ipynb` → trains V1
 - `xgboost_models/modelV2.ipynb` → trains V2
-- `xgboost_models/modelV2.5.ipynb` → trains V2.5 (best)
+- `xgboost_models/modelV2.5.ipynb` → trains V2.5
+- `xgboost_models/modelV2.5.3.ipynb` → trains V2.5.3 (best production, Optuna-tuned)
+- `xgboost_models/modelV4.ipynb` → trains V4 (grid + nuclear, best experiment)
 - `lightgbm_models/modelV2.5.ipynb` → trains LightGBM V2.5
 
 After training, the model is saved to `models/saved/`.

@@ -2,7 +2,7 @@
 
 > **Project**: Predict Finland (FI) Nord Pool day-ahead electricity spot prices (EUR/MWh) using weather data + engineered features + gradient-boosted trees.
 > **Repo**: `https://github.com/ThanSitt/nordpool_electricity_price_prediction`
-> **Last updated**: 2026-08-14
+> **Last updated**: 2026-08-15
 >
 > These notes are a deep, code-grounded companion to the `README.md`. The README is the quick reference; this document explains _why_ each piece exists, how the system works end-to-end, what has been tried, and what is currently broken or unexplored.
 
@@ -116,12 +116,13 @@ Versions are **pinned deliberately**: the saved `joblib` model bundles must dese
 
 ### 5.1 Historical (training) data — `data/originalData/`
 
-| Source                          | Files                                                                                                                                         | Resolution                 | Notes                                                                                                    |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Electricity prices              | `electricPrices/electricity_prices_helsinki.csv` (hourly), `electricPrices/15min_2023_2025.csv` (15-min)                                      | hourly / 15-min            | Nord Pool FI spot price                                                                                  |
-| Temperature                     | `Temperature/` — Helsinki-Vantaa airport raw 10-min CSVs (6-month chunks 2023–2025) → `temperature_15min.csv`, `Temperature_hourly_clean.csv` | 10-min raw → 15-min/hourly | via `15min_Temperature.ipynb`                                                                            |
-| Wind                            | `WindDirection&Speed/` — Oulu Vihreäsaari harbour raw 10-min CSVs → `wind_15min.csv`, `hourly_wind_speed.csv`                                 | 10-min raw → 15-min/hourly | via `15min_Wind.ipynb`                                                                                   |
-| Grid transmission (**V3, new**) | `GridTransmission/grid_transmission_15min.csv`                                                                                                | 15-min                     | Fingrid Open Data: `fi_ee`, `fi_no`, `fi_se_north`, `fi_se_central` (MW net flow; positive = FI exports) |
+| Source                  | Files                                                                                                                                         | Resolution                 | Notes                                                                                                                                                          |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Electricity prices      | `electricPrices/electricity_prices_helsinki.csv` (hourly), `electricPrices/15min_2023_2025.csv` (15-min)                                      | hourly / 15-min            | Nord Pool FI spot price                                                                                                                                        |
+| Temperature             | `Temperature/` — Helsinki-Vantaa airport raw 10-min CSVs (6-month chunks 2023–2025) → `temperature_15min.csv`, `Temperature_hourly_clean.csv` | 10-min raw → 15-min/hourly | via `15min_Temperature.ipynb`                                                                                                                                  |
+| Wind                    | `WindDirection&Speed/` — Oulu Vihreäsaari harbour raw 10-min CSVs → `wind_15min.csv`, `hourly_wind_speed.csv`                                 | 10-min raw → 15-min/hourly | via `15min_Wind.ipynb`                                                                                                                                         |
+| Grid transmission (V3)  | `GridTransmission/grid_transmission_15min.csv`                                                                                                | 15-min                     | Fingrid Open Data: `fi_ee`, `fi_no`, `fi_se_north`, `fi_se_central` (MW net flow; positive = FI exports)                                                       |
+| **Nuclear (V3.1, new)** | `Nuclear/nuclear_measured_15min.csv` (105,216 rows)                                                                                           | 15-min                     | Fingrid "Nuclear power production — real-time data" (dataset 188) via `15min_NucleatData.ipynb`; **measured** output → only lag/rolling features are live-safe |
 
 > Historical anomaly worth remembering: an earlier version fetched **Fingrid dataset 105** as the price source — that dataset is actually _down-regulation bid volume (MW)_, which produced a long run of zeros. The project switched to **Elering's NPS endpoint** for the real FI area price. (This is documented in `fetch_live.py`.)
 
@@ -163,11 +164,10 @@ The pipeline is a sequence of notebooks that each produce the next dataset. Each
 6. **Sort** by time, drop duplicates.
 7. **Save** a clean intermediate before feature engineering.
 
-### 6.3 V3 merge specifics (in-progress work)
+### 6.3 V3 / V3.1 merge specifics
 
-- Left-joins V2.5 onto the grid data on `datetime`.
-- 8 NaN rows at the start (2023-01-01 00:00–01:45 EET, before UTC midnight) are back-filled with the first valid value.
-- Only **lagged** grid features are created for the model (`lag_96` = 24 h, `lag_672` = 7 d) because the current-period flow is not available at inference time.
+- **V3 (grid)**: left-joins V2.5 onto `grid_transmission_15min.csv` on `datetime`; back-fills 8 leading NaN rows (2023-01-01 00:00–01:45 EET, before UTC midnight). Only **lagged** grid features are kept (`lag_96` = 24 h, `lag_672` = 7 d) — the current-period flow is not available at inference time.
+- **V3.1 (grid + nuclear)**: starts from V3 and left-joins `nuclear_measured_15min.csv` (`nuclear_power_mw`, Fingrid dataset 188). Because nuclear is **measured** (realized) output, only lag/rolling derivatives are created (`nuclear_lag_96/672`, `nuclear_rolling_mean_24h/7d`, `nuclear_change_1d`). Output: `V3.1_15min_features.csv` (70 cols) — the shared dataset with the partner's LightGBM "V3".
 
 ---
 
@@ -189,6 +189,7 @@ All feature engineering is centralized in `src/features.py` (`build_features()`)
 | **Price lags (15-min, V2.5)** | `price_lag_1/2/4/8/16/32/96/672` (15 min → 7 days)                                                                                                       |
 | **Price rolling**             | `price_rolling_mean_1h/6h/24h/7d`, `price_rolling_std_1h/24h`, `price_rolling_min/max_24h`                                                               |
 | **Grid flows (V3)**           | `fi_ee`, `fi_no`, `fi_se_north`, `fi_se_central`, `fi_se_total`, `fi_total_net`, `fi_se_abs` + `{fi_total_net, fi_se_total, fi_ee}_lag_96/672`           |
+| **Nuclear (V3.1)**            | `nuclear_power_mw`, `nuclear_lag_96`, `nuclear_lag_672`, `nuclear_rolling_mean_24h`, `nuclear_rolling_mean_7d`, `nuclear_change_1d`                      |
 | **Risk (V2.5.1, rejected)**   | `high_volatility_prob`                                                                                                                                   |
 
 ### 7.2 Why wind direction is encoded as sin/cos
@@ -376,9 +377,13 @@ Results: **LightGBM MAE 2.7167 / RMSE 8.0958 / R² 0.9727** vs **XGBoost MAE 2.7
 | `test_fetch_live.py`     | Elering FI prices at quarter-hour resolution; rejects all-zero suspicious responses.                                                                      |
 | `test_predict_system.py` | `fill_actuals` resolution matching (15-min raw / hourly mean); native 15-min forecast keeps 4 steps/hour; hourly model uses hourly mean not last quarter. |
 
-### 11.3 Model artifacts (`models/saved/`, 8 pkls)
+### 11.3 Model artifacts
 
-`xgboost_v1.pkl`, `xgboost_v1_5.pkl`, `xgboost_v2.pkl`, `xgboost_v2_5.pkl`, `xgboost_v2_5_2.pkl`, `lightgbm_v2.pkl`, `lightgbm_v2_5.pkl`, `lightgbm_v2_5_2.pkl`.
+`models/saved/` — **9 pkls**, all consumed by the live predictor:
+
+`xgboost_v1.pkl`, `xgboost_v1_5.pkl`, `xgboost_v2.pkl`, `xgboost_v2_5.pkl`, `xgboost_v2_5_2.pkl`, **`xgboost_v2_5_3.pkl`** (Optuna-tuned), `lightgbm_v2.pkl`, `lightgbm_v2_5.pkl`, `lightgbm_v2_5_2.pkl`.
+
+`models/experiments/` — **not live** (grid/nuclear features absent from `src/features.py`): `xgboost_v3.pkl`, `xgboost_v3_1.pkl`, `xgboost_v4.pkl`.
 
 ### 11.4 Predictions (`predictions/`)
 
@@ -476,7 +481,7 @@ schedule: cron '0 11 * * *' (UTC)  # ≈ 13:00/14:00 Finland, after price public
 This is the most important open issue.
 
 - Offline one-step test MAE (V2.5) = **2.82** EUR/MWh.
-- **Live recursive MAE** measured from `predictions/xgboost_v2_5_forecasts.csv` (2,597 evaluated rows) ≈ **29.6 overall**, and per-run ranges **23.6 – 35.5** across 2026-08-05 → 08-11 runs.
+- **Live recursive MAE** (as of the 2026-08-15 run, all 4,056 evaluated rows for `xgboost_v2_5`) ≈ **28.3 overall** — still ~10× the offline test MAE (2.82). Per-model live MAE: `lightgbm_v2_5` **19.58** · `lightgbm_v2` 20.85 · `xgboost_v2_5_2` 22.01 · `xgboost_v2` 26.70 · `xgboost_v1_5` 27.86 · `xgboost_v1` 28.31 · `xgboost_v2_5` 28.32. (LightGBM leads live too, mirroring its offline edge.)
 - The model **regresses toward the mean**: predicted means cluster around **44–53 EUR/MWh** while actual means swing **9 – 59 EUR/MWh** (actual range 0–150, std ≈ 36).
 
 Likely causes:
@@ -493,7 +498,7 @@ Likely causes:
 
 ### 14.3 ⚠ Hardcoded API key in a notebook (security)
 
-`data/originalData/GridTransmission/15min_GridTransmission.ipynb` contains a hardcoded Fingrid API key in a code cell (marked "TEMPORARY — do not commit with real key"). **This key should be treated as compromised and revoked.** Move it to an environment variable / secret manager. (`config.py` correctly contains no credentials; only this notebook violates the convention.)
+`data/originalData/GridTransmission/15min_GridTransmission.ipynb` **still contains a hardcoded Fingrid API key** in a code cell (verified at line 52, marked "TEMPORARY — do not commit with real key"). **Treat it as compromised and revoke it.** The newer `data/originalData/Nuclear/15min_NucleatData.ipynb` shows the correct pattern — it reads `FINGRID_API_KEY` from a gitignored `.env` file and raises a clear error otherwise. (`config.py` correctly contains no credentials.)
 
 ### 14.4 Historical bug: wrong price source
 
@@ -514,9 +519,11 @@ Earlier price data came from Fingrid dataset 105 (down-regulation bid volume, MW
 - V3 grid sign convention (positive = exports) is stated but should be re-verified against the Fingrid catalog before trusting the model.
 - The 8-row NaN back-fill at the start of `grid_transmission_15min.csv` is a one-off hack (documented, negligible impact).
 
-### 14.8 Grid & nuclear features are NOT in the live pipeline (by design)
+### 14.8 Grid & nuclear features are NOT in the live pipeline (on `chenqi`; diverged from `main`)
 
-`models/saved/` contains no model with `fi_*` or `nuclear_*` features — `src/features.py` does not build them. The grid→`src/` integration was attempted and **reverted** (records in `docs/LearningNotes_CQL/14_*`). The V3/V4 models live only in `models/experiments/` until the pipeline is extended. This is intentional: naive integration would silently produce NaN features for those columns in live forecasts.
+On this branch (`chenqi`), `models/saved/` contains no model with `fi_*` or `nuclear_*` features — `src/features.py` does not build them. The grid→`src/` integration was attempted and **reverted** (records in `docs/LearningNotes_CQL/14_*`); V3/V4 live in `models/experiments/` until the pipeline is extended. Naive integration would silently produce NaN features for those columns in live forecasts.
+
+**⚠ Branch divergence**: `main` _does_ run V3 live (`models/saved/xgboost_v3.pkl` + `predictions/xgboost_v3_forecasts.csv` in daily commits), while `chenqi` runs `xgboost_v2_5_3.pkl` and keeps V3 in experiments. Before merging V4 work, reconcile which model set is authoritative and extend `src/features.py` consistently for `fi_*`/`nuclear_*`.
 
 ---
 
@@ -524,13 +531,14 @@ Earlier price data came from Fingrid dataset 105 (down-regulation bid volume, MW
 
 ### Model & validation
 
-- **Time-series cross-validation** (e.g. rolling-origin / multiple `TimeSeriesSplit` folds) instead of a single 80/20 split, to confirm stability across seasons.
-- **Optuna tuning for all models** (V2.5 currently uses the same naive params as V1: `n_estimators=100`, `lr=0.1`).
-- **Feature importance analysis** on V2.5 to confirm which features drive predictions (likely `price_lag_672` and `price_rolling_mean_7d`).
+- **Time-series cross-validation** (e.g. rolling-origin / multiple `TimeSeriesSplit` folds) instead of a single 80/20 split, to confirm stability across seasons (V2.5.3 already uses 5-fold TS-CV for Optuna).
+- **Feature importance analysis** on V2.5.3/V4 to confirm which features drive predictions (likely `price_lag_672` and `price_rolling_mean_7d`).
+- **Propagate tuning to the whole fleet** — V2.5.3 is Optuna-tuned; the other saved models (V1/V1.5/V2, LightGBM V2) are not yet.
 
 ### Features & experiments
 
-- **Train and evaluate a V3 model** on `V3_15min_features.csv` using the same controlled-experiment discipline as V2.5.1/V2.5.2.
+- **Extend `src/features.py` with live-safe grid + nuclear features** so V4 (MAE 2.6993) can be promoted from `models/experiments/` to `models/saved/` — only lag/rolling versions are deployable.
+- **Reconcile the branch divergence** (`main` V3 vs `chenqi` V2.5.3/experiments) and agree a canonical live model set.
 - **Strengthen the high-volatility classifier** (class imbalance via `scale_pos_weight`, more features) then re-run the V2.5.1 test.
 - Apply the two-level feature validation (signal check → controlled model test) to any new candidate feature.
 
@@ -565,4 +573,4 @@ The following lessons are captured in depth in `docs/LearningNotes_CQL/` (biling
 11. **Tune first, then test features** (guide 12) — Optuna tuning improved XGBoost more than adding 13 grid features ever did; the V3/V3.1 experiments flipped from "worse" to "better" after tuning.
 12. **Train/serve gap** (guides 13–15) — the part of a feature that helps in training (current-period flows) is often NOT available at live forecast time; only lag/forward-known features are deployable.
 13. **Real supply-side signals help; noise features don't** (guide 15) — nuclear power (real, stable) improved XGBoost V4 to MAE 2.6993, while the weak-classifier "high_volatility_prob" did not.
-14. **Live ≠ offline** — recursive forecasting compounds error, and price regimes drift; always validate on live rolling predictions, not just the held-out test set.
+14. **Branch awareness in a team project** — the same repo evolves on parallel branches (`chenqi` XGBoost vs partner LightGBM vs `main`); always check `git log`/`git branch` before trusting a metric, a saved-model path, or a forecast CSV. (This caught the V3-live-on-`main` vs V3-experiment-on-`chenqi` divergence.)
