@@ -8,7 +8,6 @@ Predict Finland (FI) Nord Pool day-ahead electricity prices using weather data a
 
 - [Project Overview](#project-overview)
 - [Model Versions](#model-versions)
-- [Project Timeline (Gantt)](#project-timeline-gantt)
 - [Project Structure](#project-structure)
 - [XGBoost vs LightGBM](#xgboost-vs-lightgbm)
 - [V2.5.2 & V2.5.1 Experiments](#v252--v251-experiments)
@@ -40,47 +39,16 @@ Live:       APIs → Build Features → Load Saved Model → Predict 7 Days → 
 | V2               | Full engineered (lags, rolling, calendar, holiday) | 7.22       | 14.62      | 0.911      | Hourly + feature engineering          |
 | V2.5             | Full engineered (49)                               | 2.82       | 8.22       | 0.972      | 15-min + engineered (default XGBoost) |
 | **V2.5.3**       | Full engineered (49), **Optuna-tuned**             | **2.7236** | **8.1642** | **0.9722** | **Best production XGBoost**           |
-| V3 (XGBoost)     | + grid flows (62) — experiment                     | 2.7152     | 8.0699     | 0.9728     | Grid helps under tuned model          |
-| **V4 (XGBoost)** | + grid + nuclear (68) — experiment                 | **2.6993** | **8.0321** | **0.9731** | **Best overall — not yet live**       |
+| V3 (XGBoost)     | + grid flows (62), **default params**              | 2.847      | 8.368      | 0.971      | Temporary regression — grid hurt      |
+| V3.1 (XGBoost)   | + grid flows (62), **Optuna-tuned**                | 2.7152     | 8.0699     | 0.9728     | Grid helps under tuned model          |
+| **V4 (XGBoost)** | + grid + nuclear (68), **Optuna-tuned**            | **2.6993** | **8.0321** | **0.9731** | **Best overall — not yet live**       |
 
 ### Key Findings
 
 1. **Higher resolution alone (V1 → V1.5) barely helps** — R² 0.107 → 0.125. More rows of weak features don't help.
 2. **Feature engineering (V1 → V2) is the real breakthrough** — R² 0.107 → 0.911. Lag features, rolling statistics, and calendar features capture the autoregressive nature of electricity prices.
 3. **Both combined (V2 → V2.5) gives the best result** — R² 0.911 → 0.972, RMSE drops from 14.62 to 8.22.
-4. **Then tuning beats more features** — Optuna tuning (V2.5.3) beat adding grid features alone (V3). Adding real supply-side data (nuclear) gives V4, the best XGBoost so far (MAE 2.6993), but it is **not** in the live pipeline yet.
-
----
-
-## Project Timeline (Gantt)
-
-```mermaid
-gantt
-    title Nordpool FI Price Prediction — Evolution Timeline
-    dateFormat  YYYY-MM
-    axisFormat  %Y-%m
-
-    section Data Pipeline
-        V1 hourly clean+align        :2023-10, 1M
-        V1.5 15-min merge            :2024-01, 1M
-        V2 hourly features           :2024-03, 1M
-        V2.5 15-min features         :2024-06, 1M
-        V3 grid features             :2026-07, 1M
-        V3.1 grid+nuclear (shared)   :2026-08, 1M
-
-    section Models
-        V1/V1.5 weather-only         :2023-11, 1M
-        V2/V2.5 engineered           :2024-06, 1M
-        V2.5.2 fair XGB vs LGBM      :2026-07, 1M
-        V2.5.3 XGBoost Optuna        :2026-08, 2w
-        V3/V3.1 grid re-test         :2026-08, 2w
-        V4 grid+nuclear              :2026-08, 2w
-
-    section Live Automation
-        src/ pipeline                :2024-08, 2M
-        GitHub Actions daily         :2024-09, 2M
-        nuclear .env secret fix      :2026-08, 1w
-```
+4. **Then tuning beats more features** — Optuna tuning (V2.5.3) beat adding grid features alone: V3 (default params) was a temporary **regression** (MAE 2.847), but re-testing the same grid features under the tuned model (V3.1) **helped** (MAE 2.7152). Adding real supply-side data (nuclear) gives V4, the best XGBoost so far (MAE 2.6993), but it is **not** in the live pipeline yet.
 
 ---
 
