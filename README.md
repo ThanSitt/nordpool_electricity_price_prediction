@@ -116,7 +116,7 @@ nordpool_electricity_price_prediction/
 │
 ├── docs/
 │   ├── Project-Learning-Notes.md    ← Deep-dive project notes (16 sections)
-│   └── LearningNotes_CQL/           ← 15 bilingual learning guides (01–15)
+│   └── LearningNotes_CQL/           ← 16 bilingual learning guides (01–16)
 │
 └── .github/workflows/               ← GitHub Actions auto-run config
 ```
@@ -130,7 +130,7 @@ nordpool_electricity_price_prediction/
 - **Tree growth:** level-wise (grows all nodes at the same level simultaneously)
 - **Pros:** More conservative, less overfitting, beginner-friendly
 - **Cons:** Slower on large datasets
-- **Used with:** Default hyperparameters
+- **Used with:** Default hyperparameters for V1–V2.5; Optuna-tuned for V2.5.3+
 
 ### LightGBM (`lightgbm_models/` folder)
 
