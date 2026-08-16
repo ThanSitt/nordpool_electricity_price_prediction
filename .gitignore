@@ -40,6 +40,9 @@ desktop.ini
 .env
 src/config.local.py
 
+# Personal learning sandbox — local only, never pushed
+learning/
+
 # IDE
 .vscode/
 .idea/
