@@ -43,13 +43,17 @@ def load_models() -> dict:
 
 def run_forecast(model, feature_cols: list[str], step_min: int,
                  start_dt: pd.Timestamp, price_buf: feat_lib.PriceBuffer,
-                 wx_buf: feat_lib.WeatherBuffer) -> list[tuple[pd.Timestamp, float]]:
+                 wx_buf: feat_lib.WeatherBuffer,
+                 grid_buf: feat_lib.GridBuffer | None = None,
+                 nuclear_buf: feat_lib.NuclearBuffer | None = None,
+                 ) -> list[tuple[pd.Timestamp, float]]:
     """Recursively produce seven days of predictions at ``step_min`` resolution."""
     step = pd.Timedelta(minutes=step_min)
     results: list[tuple[pd.Timestamp, float]] = []
     for i in range(FORECAST_HOURS * (60 // step_min)):
         timestamp = start_dt + i * step
-        features = feat_lib.build_features(timestamp, price_buf, wx_buf)
+        features = feat_lib.build_features(timestamp, price_buf, wx_buf,
+                                           grid_buf, nuclear_buf)
         row = pd.DataFrame([{column: features.get(column, np.nan) for column in feature_cols}])[feature_cols]
         prediction = float(model.predict(row)[0])
         price_buf.add(timestamp, prediction)
@@ -141,6 +145,17 @@ def main() -> None:
     print(f'  got {len(weather_df)} hourly weather records')
     weather_buf = feat_lib.WeatherBuffer(weather_df)
 
+    grid_history_start = now - pd.Timedelta(hours=config.GRID_HISTORY_HOURS)
+    print(f'Fetching grid transmission {grid_history_start:%Y-%m-%d} → {now:%Y-%m-%d %H:%M} ...')
+    grid_df = fetch_live.fetch_grid(grid_history_start, now)
+    grid_buf = feat_lib.GridBuffer(grid_df if not grid_df.empty else None)
+    print(f'  got {len(grid_df)} 15-min grid records' if not grid_df.empty else '  grid data unavailable — features will be NaN')
+
+    print(f'Fetching nuclear power {grid_history_start:%Y-%m-%d} → {now:%Y-%m-%d %H:%M} ...')
+    nuclear_df = fetch_live.fetch_nuclear(grid_history_start, now)
+    nuclear_buf = feat_lib.NuclearBuffer(nuclear_df if not nuclear_df.empty else None)
+    print(f'  got {len(nuclear_df)} 15-min nuclear records' if not nuclear_df.empty else '  nuclear data unavailable — features will be NaN')
+
     print('\nLoading models ...')
     models = load_models()
     if not models:
@@ -157,7 +172,8 @@ def main() -> None:
 
         price_buf = feat_lib.PriceBuffer(_history_for_model(actual_prices, step_min))
         predictions = run_forecast(meta['model'], meta['feature_cols'], step_min,
-                                   predict_start, price_buf, weather_buf)
+                                   predict_start, price_buf, weather_buf,
+                                   grid_buf, nuclear_buf)
         new_rows = pd.DataFrame([
             {
                 'run_date': now,
