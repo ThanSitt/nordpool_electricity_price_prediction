@@ -2,7 +2,7 @@
 
 > **Project**: Predict Finland (FI) Nord Pool day-ahead electricity spot prices (EUR/MWh) using weather data + engineered features + gradient-boosted trees.
 > **Repo**: `https://github.com/ThanSitt/nordpool_electricity_price_prediction`
-> **Last updated**: 2026-08-15
+> **Last updated**: 2026-08-25
 >
 > These notes are a deep, code-grounded companion to the `README.md`. The README is the quick reference; this document explains _why_ each piece exists, how the system works end-to-end, what has been tried, and what is currently broken or unexplored.
 
@@ -34,7 +34,7 @@ Live flow (src/):            Public APIs → Build Features → Load .pkl → Re
 - **What it predicts**: the FI Nord Pool day-ahead spot price for every 15-minute slot over the next 7 days (672 slots), in EUR/MWh.
 - **Why it matters**: day-ahead prices drive energy trading, hedging, and consumption planning. A usable forecast (MAE ≈ 2.8 EUR/MWh offline) is well within practical decision tolerance.
 - **How it is delivered**: `src/predict_system.py` runs daily and writes one CSV per model into `predictions/`. A GitHub Actions workflow runs it automatically every day at 11:00 UTC (≈13:00/14:00 Finland time, after Nord Pool publishes tomorrow's prices ~12:00 EET) and commits the updated forecasts.
-- **Educational goal**: the repository is deliberately built as a _learning_ project. `docs/LearningNotes_CQL/` contains 16 bilingual (English/Chinese) learning guides (01–16) that document every concept: data cleaning, feature engineering, model training, comparison, automation, visualization, the `src/` folder, why features can fail, the nuclear/V4 work, and the model warehouse (saved vs experiments). The `.pkl` "model bundle" concept, recursive forecasting, and time-series evaluation are all explained there for a beginner audience.
+- **Educational goal**: the repository is deliberately built as a _learning_ project. `docs/LearningNotes_CQL/` contains 17 bilingual (English/Chinese) learning guides (01–17) that document every concept: data cleaning, feature engineering, model training, comparison, automation, visualization, the `src/` folder, why features can fail, the nuclear/V4 work, the model warehouse (saved vs experiments), and the EDA + forecast visualization walkthrough. The `.pkl` "model bundle" concept, recursive forecasting, and time-series evaluation are all explained there for a beginner audience.
 
 ---
 
@@ -133,6 +133,7 @@ Versions are **pinned deliberately**: the saved `joblib` model bundles must dese
 | **Elering NPS**                            | FI Nord Pool day-ahead prices, 15-min resolution                                                                 | `https://dashboard.elering.ee/api/nps/price` |
 | **FMI** (Finnish Meteorological Institute) | Observations (`place=Helsinki`/`place=Oulu`) + HIRLAM short-range forecast (~54 h, `latlon=` grid interpolation) | `https://opendata.fmi.fi/wfs`                |
 | **Open-Meteo**                             | Long-range hourly forecast (10 forecast days) for the remaining days                                             | `https://api.open-meteo.com/v1/forecast`     |
+| **Fingrid (V3.1, new)**                    | Cross-border grid flows (datasets 55/57/60/61) + nuclear output (dataset 188), 15-min — **requires `FINGRID_API_KEY` env var** | `https://data.fingrid.fi/api/datasets/...` |
 
 **Station pairing is deliberate**: temperature comes from Helsinki-Vantaa airport and wind from Oulu — the **same stations used in training** — so live features stay consistent with training distributions.
 
@@ -303,6 +304,7 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
 | **V3** (XGBoost)   | 62 (+13 grid)   | ~84k       | 2.847      | 8.368      | 0.9708     | Default params — temporary regression  |
 | **V3.1** (XGBoost) | 62 (+13 grid)   | ~84k       | 2.7152     | 8.0699     | 0.9728     | Optuna re-test — grid helps            |
 | **V4** (XGBoost)   | 68 (+6 nuclear) | ~84k       | **2.6993** | **8.0321** | **0.9731** | **Best XGBoost so far** (grid+nuclear) |
+| **V3.1** (LightGBM) | 68 (+19 grid+nuclear) | ~84k | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live** (V2.5 params) |
 
 ### 9.3 Why V2.5 wins
 
@@ -336,6 +338,8 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
 | 12  | V3.1_live (grid lags)     | `xgboost_models/modelV3.1_live.ipynb`                   | lag-only grid (55), live-feasible                      | +0.0180 (hurts)                                       | Grid NOT deployable (train/serve gap)               |
 | 13  | Nuclear + V3.1 dataset    | `data/convertData/V3.1_15min_feature_engineering.ipynb` | V3 + 6 nuclear features (shared dataset)               | `V3.1_15min_features.csv` (70 cols)                   | Shared with partner (his LightGBM "V3")             |
 | 14  | **XGBoost V4**            | `xgboost_models/modelV4.ipynb`                          | V3 + nuclear, tuned params                             | **MAE 2.6993 / RMSE 8.0321 / R² 0.9731** (Δ−0.0159)   | **Best XGBoost so far** — nuclear helps             |
+| 15  | **LightGBM V3.1**         | `lightgbm_models/modelV3.1.ipynb`                       | V3.1 dataset (68 feats), Optuna 30×5 then **V2.5 params** | CV 2.8485 → test **2.6390 / 7.8957 / 0.9740** | Optuna overfit; V2.5 regularization transferred — **new best, now live** |
+| 16  | **Grid+nuclear live**     | `src/features.py`, `src/fetch_live.py`, `src/predict_system.py` | GridBuffer/NuclearBuffer + fetch_grid/fetch_nuclear (Fingrid) | `lightgbm_v3_1.pkl` runs daily with real grid/nuclear | Train/serve gap closed (2026-08-25)                  |
 
 ### 10.1 V2.5.2 details (fair XGBoost vs LightGBM)
 
@@ -364,10 +368,10 @@ Results: **LightGBM MAE 2.7167 / RMSE 8.0958 / R² 0.9727** vs **XGBoost MAE 2.7
 
 | File                | Purpose                                                                                                             |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `config.py`         | Runtime config: paths, public API URLs, `FORECAST_HOURS=168`, `PRICE_HISTORY_HOURS=200`, timezone. No credentials.  |
-| `features.py`       | `build_features()` + `PriceBuffer` + `WeatherBuffer` — the canonical feature pipeline (mirrors training notebooks). |
-| `fetch_live.py`     | `fetch_prices()` (Elering) + `fetch_weather()` (FMI + Open-Meteo, with long-range coverage guard).                  |
-| `predict_system.py` | Main program: `load_models()`, `run_forecast()`, `fill_actuals()`, `save_csv()`, accuracy summary.                  |
+| `config.py`         | Runtime config: paths, API URLs, `FORECAST_HOURS=168`, `PRICE_HISTORY_HOURS=200`, **Fingrid dataset IDs + `GRID_HISTORY_HOURS`**, timezone. No hardcoded credentials. |
+| `features.py`       | `build_features()` + `PriceBuffer` + `WeatherBuffer` + **`GridBuffer` + `NuclearBuffer`** — the canonical feature pipeline (now includes V3.1 grid/nuclear features). |
+| `fetch_live.py`     | `fetch_prices()` (Elering) + `fetch_weather()` (FMI + Open-Meteo) + **`fetch_grid()` + `fetch_nuclear()`** (Fingrid, uses `FINGRID_API_KEY`). |
+| `predict_system.py` | Main program: `load_models()`, `run_forecast()`, `fill_actuals()`, `save_csv()`, accuracy summary. Fetches grid + nuclear and passes buffers to every model. |
 | `utils.py`          | Currently **empty** (placeholder).                                                                                  |
 | `test_fmi.py`       | Diagnostic script for FMI WFS endpoint variants (latlon, place, fmisid, bbox, timestep).                            |
 
@@ -381,11 +385,11 @@ Results: **LightGBM MAE 2.7167 / RMSE 8.0958 / R² 0.9727** vs **XGBoost MAE 2.7
 
 ### 11.3 Model artifacts
 
-`models/saved/` — **9 pkls**, all consumed by the live predictor:
+`models/saved/` — **10 pkls**, all consumed by the live predictor:
 
-`xgboost_v1.pkl`, `xgboost_v1_5.pkl`, `xgboost_v2.pkl`, `xgboost_v2_5.pkl`, `xgboost_v2_5_2.pkl`, **`xgboost_v2_5_3.pkl`** (Optuna-tuned), `lightgbm_v2.pkl`, `lightgbm_v2_5.pkl`, `lightgbm_v2_5_2.pkl`.
+`xgboost_v1.pkl`, `xgboost_v1_5.pkl`, `xgboost_v2.pkl`, `xgboost_v2_5.pkl`, `xgboost_v2_5_2.pkl`, **`xgboost_v2_5_3.pkl`** (Optuna-tuned), `lightgbm_v2.pkl`, `lightgbm_v2_5.pkl`, `lightgbm_v2_5_2.pkl`, **`lightgbm_v3_1.pkl`** (grid + nuclear — the only live model using those features).
 
-`models/experiments/` — **not live** (grid/nuclear features absent from `src/features.py`): `xgboost_v3.pkl`, `xgboost_v3_1.pkl`, `xgboost_v4.pkl`.
+`models/experiments/` — XGBoost grid/nuclear experiments, **not live**: `xgboost_v3.pkl`, `xgboost_v3_1.pkl`, `xgboost_v4.pkl`. (Grid/nuclear features ARE now in `src/features.py`; these XGBoost variants simply were never promoted.)
 
 ### 11.4 Predictions (`predictions/`)
 
@@ -394,14 +398,14 @@ One CSV per model (`<name>_forecasts.csv`) with columns: `run_date`, `target_dat
 ### 11.5 Notebooks
 
 - Data: `data/convertData/*.ipynb` (cleaning, feature engineering, risk feature).
-- Models: `xgboost_models/modelV*.ipynb`, `lightgbm_models/modelV2*.ipynb`.
-- Visualization: `data_visualization/eda_and_forecast_visualization.ipynb` (writes `charts/*.png`), `docs/LearningNotes_CQL/model_visualization.ipynb`.
+- Models: `xgboost_models/modelV*.ipynb`, `lightgbm_models/modelV2*.ipynb`, **`lightgbm_models/modelV3.1.ipynb`** (best model).
+- Visualization: `data_visualization/forecast_visualization.ipynb` (interactive Plotly, **no PNG saving** since 2026-08-25), `data_visualization/eda_1.1.ipynb`, `docs/LearningNotes_CQL/model_visualization.ipynb`.
 
 ### 11.6 Docs & automation
 
 - `README.md` — quick reference.
 - `docs/Project-Learning-Notes.md` — **this file**.
-- `docs/LearningNotes_CQL/*.md` — 16 bilingual learning guides (01–16): roadmap, training, cleaning, feature engineering, V1.5 plan, comparison+automation, high-volatility classifier, training→automation mental model, V2.5.1 experiment, visualization, `src/` folder, why features fail + Optuna, grid revert record, nuclear/V4, models/ folder (saved vs experiments).
+- `docs/LearningNotes_CQL/*.md` — 17 bilingual learning guides (01–17): roadmap, training, cleaning, feature engineering, V1.5 plan, comparison+automation, high-volatility classifier, training→automation mental model, V2.5.1 experiment, visualization, `src/` folder, why features fail + Optuna, grid revert record, nuclear/V4, models/ folder (saved vs experiments), EDA + forecast visualization walkthrough.
 - `.github/workflows/daily_forecast.yml` — daily automation.
 
 ---
@@ -417,6 +421,8 @@ history_start = now − 200h ; price_fetch_end = predict_start + 24h
   ↓
 fetch_prices(history_start, price_fetch_end)        # Elering, FI 15-min
 fetch_weather(history_start, weather_end)           # FMI + Open-Meteo hourly
+fetch_grid(history_start, now)                      # Fingrid cross-border flows (FINGRID_API_KEY)
+fetch_nuclear(history_start, now)                   # Fingrid nuclear output (FINGRID_API_KEY)
   ↓
 for each *.pkl in models/saved:
     frame = fill_actuals(load_csv(name), actuals, step_min)   # back-fill past
@@ -464,11 +470,12 @@ schedule: cron '0 11 * * *' (UTC)  # ≈ 13:00/14:00 Finland, after price public
 
 ## 13. Current Project Status
 
-- **9 trained models** live in `models/saved/` (now including `xgboost_v2_5_3.pkl` — the Optuna-tuned XGBoost), all consumed by the live predictor.
-- **Experiment models** in `models/experiments/`: `xgboost_v3.pkl`, `xgboost_v4.pkl`, `xgboost_v3_1.pkl` (grid/nuclear features NOT in the live pipeline, so kept out of `models/saved/`).
-- **Daily forecasts are running and committing automatically** (git history shows `forecast: YYYY-MM-DD daily update` commits).
-- **Best production model**: XGBoost V2.5.3 (MAE 2.7236 / RMSE 8.1642 / R² 0.9722).
-- **Best overall (experiment)**: **XGBoost V4** — grid + nuclear (MAE 2.6993 / R² 0.9731), trained on the shared `V3.1_15min_features.csv`.
+- **10 trained models** live in `models/saved/` — including `xgboost_v2_5_3.pkl` (Optuna-tuned XGBoost) and the new **`lightgbm_v3_1.pkl`**.
+- **Best model overall**: **LightGBM V3.1** (grid + nuclear, MAE 2.6390 / RMSE 7.8957 / R² 0.9740) — the first and only live model using grid/nuclear features; it now runs every day.
+- **Grid + nuclear are LIVE** (2026-08-25): `src/` now fetches Fingrid flows + nuclear via `fetch_grid`/`fetch_nuclear` and builds them with `GridBuffer`/`NuclearBuffer`; the workflow injects `FINGRID_API_KEY` as a secret.
+- **XGBoost experiments** in `models/experiments/`: `xgboost_v3.pkl`, `xgboost_v3_1.pkl`, `xgboost_v4.pkl` (V4 = best XGBoost, MAE 2.6993 — not promoted).
+- **Daily forecasts are running and committing automatically** (git history shows daily updates through 2026-08-24).
+- **Best production XGBoost**: V2.5.3 (MAE 2.7236 / RMSE 8.1642 / R² 0.9722).
 - **Nuclear data done**: `data/originalData/Nuclear/nuclear_measured_15min.csv` (105,216 rows, Fingrid dataset 188).
 - **Grid → src integration REVERTED** (2026-08-14): records in `docs/LearningNotes_CQL/14_grid_src_integration_reverted.md` + `grid_src_integration.patch`.
 - **Unit tests** pass (7) and are enforced in CI before every forecast run.
@@ -521,11 +528,14 @@ Earlier price data came from Fingrid dataset 105 (down-regulation bid volume, MW
 - V3 grid sign convention (positive = exports) is stated but should be re-verified against the Fingrid catalog before trusting the model.
 - The 8-row NaN back-fill at the start of `grid_transmission_15min.csv` is a one-off hack (documented, negligible impact).
 
-### 14.8 Grid & nuclear features are NOT in the live pipeline (on `chenqi`; diverged from `main`)
+### 14.8 Grid & nuclear features — now LIVE (resolved 2026-08-25)
 
-On this branch (`chenqi`), `models/saved/` contains no model with `fi_*` or `nuclear_*` features — `src/features.py` does not build them. The grid→`src/` integration was attempted and **reverted** (records in `docs/LearningNotes_CQL/14_*`); V3/V4 live in `models/experiments/` until the pipeline is extended. Naive integration would silently produce NaN features for those columns in live forecasts.
+The train/serve gap for grid/nuclear features was **closed**: `src/features.py` now has `GridBuffer` + `NuclearBuffer`, `src/fetch_live.py` adds `fetch_grid()`/`fetch_nuclear()` (Fingrid), and `predict_system.py` feeds them to every model. `lightgbm_v3_1.pkl` (which needs those features) is the live proof.
 
-**⚠ Branch divergence**: `main` _does_ run V3 live (`models/saved/xgboost_v3.pkl` + `predictions/xgboost_v3_forecasts.csv` in daily commits), while `chenqi` runs `xgboost_v2_5_3.pkl` and keeps V3 in experiments. Before merging V4 work, reconcile which model set is authoritative and extend `src/features.py` consistently for `fi_*`/`nuclear_*`.
+Remaining caveats:
+- **Live fallback is forward-fill, not NaN**: both buffers fall back to the last observed value for forecast-period steps (grid flows and nuclear output are assumed stable within a day). This is a deliberate approximation; verify it holds during unusual grid events.
+- **`FINGRID_API_KEY` is now a required live dependency** (GitHub secret `FINGRID_API_KEY`; set it or grid/nuclear features degrade to NaN → LightGBM V3.1 forecasts degrade).
+- XGBoost V3/V4 remain experiments; the live grid/nuclear path was only validated through the LightGBM V3.1 model.
 
 ---
 
@@ -539,8 +549,9 @@ On this branch (`chenqi`), `models/saved/` contains no model with `fi_*` or `nuc
 
 ### Features & experiments
 
-- **Extend `src/features.py` with live-safe grid + nuclear features** so V4 (MAE 2.6993) can be promoted from `models/experiments/` to `models/saved/` — only lag/rolling versions are deployable.
-- **Reconcile the branch divergence** (`main` V3 vs `chenqi` V2.5.3/experiments) and agree a canonical live model set.
+- **Promote XGBoost V4 (MAE 2.6993) or keep LightGBM V3.1 (MAE 2.6390) as the single production model** — grid/nuclear features are now live, so promotion is feasible.
+- **Validate the forward-fill fallback** in `GridBuffer`/`NuclearBuffer` during high-volatility grid periods; consider raising instead of silently carrying the last value.
+- **Monitor LightGBM V3.1's live error** once it accumulates evaluated rows — it's the first model exercising the new live Fingrid path.
 - **Strengthen the high-volatility classifier** (class imbalance via `scale_pos_weight`, more features) then re-run the V2.5.1 test.
 - Apply the two-level feature validation (signal check → controlled model test) to any new candidate feature.
 
@@ -560,7 +571,7 @@ On this branch (`chenqi`), `models/saved/` contains no model with `fi_*` or `nuc
 
 ## 16. Learning Notes
 
-The following lessons are captured in depth in `docs/LearningNotes_CQL/` (bilingual guides 01–16). Highlights:
+The following lessons are captured in depth in `docs/LearningNotes_CQL/` (bilingual guides 01–17). Highlights:
 
 1. **Baseline before models** — always build a naive/linear baseline to know if the real model beats a simple guess.
 2. **Time-series evaluation** — split chronologically, never shuffle; test on the most recent period the model hasn't seen.
@@ -576,3 +587,4 @@ The following lessons are captured in depth in `docs/LearningNotes_CQL/` (biling
 12. **Train/serve gap** (guides 13–15) — the part of a feature that helps in training (current-period flows) is often NOT available at live forecast time; only lag/forward-known features are deployable.
 13. **Real supply-side signals help; noise features don't** (guide 15) — nuclear power (real, stable) improved XGBoost V4 to MAE 2.6993, while the weak-classifier "high_volatility_prob" did not.
 14. **Branch awareness in a team project** — the same repo evolves on parallel branches (`chenqi` XGBoost vs partner LightGBM vs `main`); always check `git log`/`git branch` before trusting a metric, a saved-model path, or a forecast CSV. (This caught the V3-live-on-`main` vs V3-experiment-on-`chenqi` divergence.)
+15. **Reuse proven regularization when adding features** (LightGBM V3.1, 2026-08) — Optuna re-tuning on the new 68-feature set overfit (CV 2.8485 → test 2.6788); carrying over the V2.5 params (heavy `reg_lambda`) beat both and set a new best (2.6390). When you add features, don't assume retuning helps — the old, well-regularized config may transfer better.

@@ -41,7 +41,8 @@ Live:       APIs → Build Features → Load Saved Model → Predict 7 Days → 
 | **V2.5.3**       | Full engineered (49), **Optuna-tuned**             | **2.7236** | **8.1642** | **0.9722** | **Best production XGBoost**           |
 | V3 (XGBoost)     | + grid flows (62), **default params**              | 2.847      | 8.368      | 0.971      | Temporary regression — grid hurt      |
 | V3.1 (XGBoost)   | + grid flows (62), **Optuna-tuned**                | 2.7152     | 8.0699     | 0.9728     | Grid helps under tuned model          |
-| **V4 (XGBoost)** | + grid + nuclear (68), **Optuna-tuned**            | **2.6993** | **8.0321** | **0.9731** | **Best overall — not yet live**       |
+| **V4 (XGBoost)** | + grid + nuclear (68), **Optuna-tuned**            | 2.6993     | 8.0321     | 0.9731     | Best XGBoost — experiment only        |
+| **LightGBM V3.1** | + grid + nuclear (68), **V2.5 params**            | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live**         |
 
 ### Key Findings
 
@@ -92,12 +93,13 @@ nordpool_electricity_price_prediction/
 │
 ├── lightgbm_models/                 ← LightGBM training notebooks
 │   ├── modelV2.ipynb                ← V2: hourly + engineered
-│   └── modelV2.5.ipynb              ← V2.5: 15-min + engineered
+│   ├── modelV2.5.ipynb              ← V2.5: 15-min + engineered
+│   └── modelV3.1.ipynb              ← V3.1: grid + nuclear (best, live)
 │
 ├── models/
-│   ├── saved/                       ← Live predictor models (.pkl) — 9 models
+│   ├── saved/                       ← Live predictor models (.pkl) — 10 models
 │   │   ├── xgboost_v1/v1_5/v2/v2_5/v2_5_2/v2_5_3.pkl
-│   │   └── lightgbm_v2/v2_5/v2_5_2.pkl
+│   │   └── lightgbm_v2/v2_5/v2_5_2/v3_1.pkl
 │   └── experiments/                 ← Not live (grid/nuclear not in src/): xgboost_v3/v3_1/v4.pkl
 │
 ├── src/                             ← Live prediction source code
@@ -116,7 +118,7 @@ nordpool_electricity_price_prediction/
 │
 ├── docs/
 │   ├── Project-Learning-Notes.md    ← Deep-dive project notes (16 sections)
-│   └── LearningNotes_CQL/           ← 16 bilingual learning guides (01–16)
+│   └── LearningNotes_CQL/           ← 17 bilingual learning guides (01–17)
 │
 └── .github/workflows/               ← GitHub Actions auto-run config
 ```
@@ -141,7 +143,7 @@ nordpool_electricity_price_prediction/
 
 ### In this project
 
-Both algorithms are trained on the same data with the same features. The LightGBM versions use Optuna tuning and perform slightly better; the best XGBoost (V2.5.3) is now Optuna-tuned too and is the best production model. All 9 saved models in `models/saved/` are loaded and run by the live predictor every day. V3/V4 (grid + nuclear) stay in `models/experiments/` until the live feature pipeline is extended.
+Both algorithms are trained on the same data with the same features. The LightGBM versions use Optuna tuning and perform slightly better. The **best model overall is LightGBM V3.1** (grid + nuclear, MAE 2.6390) — the first live model using Fingrid grid/nuclear features. All **10 saved models** in `models/saved/` are loaded and run by the live predictor every day. XGBoost V3/V4 remain in `models/experiments/`.
 
 ---
 
@@ -216,7 +218,8 @@ Start: python src/predict_system.py
   │
   ├─ 1. fetch_live.py
   │     ├─ Gets FI day-ahead prices from Elering API (free, no API key)
-  │     └─ Gets weather forecast from FMI + Open-Meteo (free)
+  │     ├─ Gets weather forecast from FMI + Open-Meteo (free)
+  │     └─ Gets grid flows + nuclear output from Fingrid (FINGRID_API_KEY)
   │
   ├─ 2. features.py
   │     ├─ Builds time features (hour, minute, day_of_week, season...)
@@ -225,7 +228,7 @@ Start: python src/predict_system.py
   │     └─ Builds holiday flags
   │
   ├─ 3. predict_system.py
-  │     ├─ Loads all 6 models from models/saved/
+  │     ├─ Loads all 10 models from models/saved/
   │     ├─ Recursively forecasts 7 days for each model
   │     ├─ Saves one CSV per model into predictions/
   │     └─ Fills in actual prices when they become available
@@ -312,8 +315,9 @@ Open and run the notebooks:
 - `xgboost_models/modelV2.5.3.ipynb` → trains V2.5.3 (best production, Optuna-tuned)
 - `xgboost_models/modelV4.ipynb` → trains V4 (grid + nuclear, best experiment)
 - `lightgbm_models/modelV2.5.ipynb` → trains LightGBM V2.5
+- `lightgbm_models/modelV3.1.ipynb` → trains LightGBM V3.1 (best model, live)
 
-After training, the model is saved to `models/saved/`.
+After training, the model is saved to `models/saved/`. The live run also needs a `FINGRID_API_KEY` environment variable (set as a GitHub secret) for the Fingrid grid + nuclear fetchers.
 
 ---
 
