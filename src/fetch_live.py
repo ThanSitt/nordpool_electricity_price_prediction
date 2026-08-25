@@ -8,6 +8,7 @@ silently reuses a 54-hour weather forecast for the remaining days.
 
 from __future__ import annotations
 
+import os
 import time
 import xml.etree.ElementTree as ET
 
@@ -229,6 +230,106 @@ def _fetch_open_meteo_weather() -> pd.DataFrame:
     result['wind_speed'] = wind['wind_speed'].reindex(index) if 'wind_speed' in wind else np.nan
     result['wind_direction_deg'] = wind['wind_direction_deg'].reindex(index) if 'wind_direction_deg' in wind else np.nan
     return result[_WX_COLS]
+
+
+# --- Fingrid (grid transmission + nuclear) ------------------------------------
+
+def _fetch_fingrid_pages(dataset_id: int, start: pd.Timestamp,
+                         end: pd.Timestamp, api_key: str) -> pd.DataFrame:
+    """Fetch all pages from one Fingrid dataset with 429 backoff."""
+    url = config.FINGRID_API_URL.format(dataset_id=dataset_id)
+    headers = {'x-api-key': api_key}
+    start_utc = start.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
+    end_utc   = end.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
+    all_rows: list = []
+    page = 1
+    while True:
+        for attempt in range(5):
+            resp = requests.get(url, headers=headers, params={
+                'startTime': start_utc, 'endTime': end_utc,
+                'format': 'json', 'pageSize': 10000, 'page': page,
+            }, timeout=_TIMEOUT)
+            if resp.status_code == 429:
+                wait = 60 * (attempt + 1)
+                print(f'    Fingrid 429 — waiting {wait}s (attempt {attempt+1}/5) ...')
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            break
+        else:
+            raise RuntimeError(f'Fingrid dataset {dataset_id}: still 429 after 5 retries')
+        rows = resp.json().get('data', [])
+        all_rows.extend(rows)
+        if len(rows) < 10000:
+            break
+        page += 1
+        time.sleep(2)
+    if not all_rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(all_rows)
+    df['datetime'] = pd.to_datetime(df['startTime'], utc=True).dt.tz_convert(_HELSINKI)
+    return df.set_index('datetime')[['value']].sort_index()
+
+
+def fetch_grid(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """Fetch cross-border power flows from Fingrid for the given window.
+
+    Returns a DataFrame with columns fi_ee, fi_no, fi_se_north, fi_se_central
+    (plus derived fi_se_total, fi_total_net, fi_se_abs) indexed in Helsinki time
+    at 15-minute resolution.  Returns an empty DataFrame if the API key is
+    missing or all fetches fail — callers must handle gracefully.
+    """
+    api_key = os.environ.get('FINGRID_API_KEY')
+    if not api_key:
+        print('  WARNING: FINGRID_API_KEY not set — grid features will be NaN')
+        return pd.DataFrame()
+    start, end = _to_helsinki(start), _to_helsinki(end)
+    frames: dict[str, pd.Series] = {}
+    for i, (name, ds_id) in enumerate(config.FINGRID_GRID_DATASETS.items()):
+        if i > 0:
+            time.sleep(10)
+        try:
+            df = _fetch_fingrid_pages(ds_id, start, end, api_key)
+            if not df.empty:
+                frames[name] = df['value'].rename(name)
+        except Exception as exc:
+            print(f'  WARNING: Fingrid grid fetch {name} (dataset {ds_id}): {exc}')
+    if not frames:
+        return pd.DataFrame()
+    combined = pd.concat(frames.values(), axis=1).sort_index()
+    idx_15 = pd.date_range(start, end, freq='15min', tz=_HELSINKI)
+    combined = combined.reindex(idx_15).ffill().bfill()
+    # Derived features
+    combined['fi_se_total']  = combined['fi_se_north'] + combined['fi_se_central']
+    combined['fi_total_net'] = combined[list(config.FINGRID_GRID_DATASETS)].sum(axis=1)
+    combined['fi_se_abs']    = combined['fi_se_total'].abs()
+    return combined
+
+
+def fetch_nuclear(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """Fetch nuclear power production from Fingrid for the given window.
+
+    Returns a DataFrame with a single column nuclear_power_mw in Helsinki time
+    at 15-minute resolution (resampled from the ~3-min real-time feed).
+    Returns an empty DataFrame if the API key is missing or the fetch fails.
+    """
+    api_key = os.environ.get('FINGRID_API_KEY')
+    if not api_key:
+        print('  WARNING: FINGRID_API_KEY not set — nuclear features will be NaN')
+        return pd.DataFrame()
+    start, end = _to_helsinki(start), _to_helsinki(end)
+    try:
+        df = _fetch_fingrid_pages(config.FINGRID_NUCLEAR_DATASET, start, end, api_key)
+    except Exception as exc:
+        print(f'  WARNING: Fingrid nuclear fetch failed: {exc}')
+        return pd.DataFrame()
+    if df.empty:
+        return pd.DataFrame()
+    # Resample ~3-min real-time feed to 15-min mean (matches training resolution)
+    nuclear_15 = df['value'].resample('15min').mean()
+    idx_15 = pd.date_range(start, end, freq='15min', tz=_HELSINKI)
+    nuclear_15 = nuclear_15.reindex(idx_15).ffill().bfill()
+    return nuclear_15.rename('nuclear_power_mw').to_frame()
 
 
 def fetch_weather(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
