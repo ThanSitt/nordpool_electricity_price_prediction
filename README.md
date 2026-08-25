@@ -32,17 +32,17 @@ Live:       APIs → Build Features → Load Saved Model → Predict 7 Days → 
 
 ## Model Versions
 
-| Model            | Features                                           | Test MAE   | RMSE       | R²         | Description                           |
-| ---------------- | -------------------------------------------------- | ---------- | ---------- | ---------- | ------------------------------------- |
-| V1               | Weather only (temp, wind)                          | 33.13      | 46.34      | 0.107      | Hourly weather-only baseline          |
-| V1.5             | Weather only (temp, wind, direction)               | 32.19      | 45.78      | 0.125      | 15-min weather-only baseline          |
-| V2               | Full engineered (lags, rolling, calendar, holiday) | 7.22       | 14.62      | 0.911      | Hourly + feature engineering          |
-| V2.5             | Full engineered (49)                               | 2.82       | 8.22       | 0.972      | 15-min + engineered (default XGBoost) |
-| **V2.5.3**       | Full engineered (49), **Optuna-tuned**             | **2.7236** | **8.1642** | **0.9722** | **Best production XGBoost**           |
-| V3 (XGBoost)     | + grid flows (62), **default params**              | 2.847      | 8.368      | 0.971      | Temporary regression — grid hurt      |
-| V3.1 (XGBoost)   | + grid flows (62), **Optuna-tuned**                | 2.7152     | 8.0699     | 0.9728     | Grid helps under tuned model          |
-| **V4 (XGBoost)** | + grid + nuclear (68), **Optuna-tuned**            | 2.6993     | 8.0321     | 0.9731     | Best XGBoost — experiment only        |
-| **LightGBM V3.1** | + grid + nuclear (68), **V2.5 params**            | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live**         |
+| Model             | Features                                           | Test MAE   | RMSE       | R²         | Description                           |
+| ----------------- | -------------------------------------------------- | ---------- | ---------- | ---------- | ------------------------------------- |
+| V1                | Weather only (temp, wind)                          | 33.13      | 46.34      | 0.107      | Hourly weather-only baseline          |
+| V1.5              | Weather only (temp, wind, direction)               | 32.19      | 45.78      | 0.125      | 15-min weather-only baseline          |
+| V2                | Full engineered (lags, rolling, calendar, holiday) | 7.22       | 14.62      | 0.911      | Hourly + feature engineering          |
+| V2.5              | Full engineered (49)                               | 2.82       | 8.22       | 0.972      | 15-min + engineered (default XGBoost) |
+| **V2.5.3**        | Full engineered (49), **Optuna-tuned**             | **2.7236** | **8.1642** | **0.9722** | **Best production XGBoost**           |
+| V3 (XGBoost)      | + grid flows (62), **default params**              | 2.847      | 8.368      | 0.971      | Temporary regression — grid hurt      |
+| V3.1 (XGBoost)    | + grid flows (62), **Optuna-tuned**                | 2.7152     | 8.0699     | 0.9728     | Grid helps under tuned model          |
+| **V4 (XGBoost)**  | + grid + nuclear (68), **Optuna-tuned**            | 2.6993     | 8.0321     | 0.9731     | Best XGBoost — experiment only        |
+| **LightGBM V3.1** | + grid + nuclear (68), **V2.5 params**             | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live**         |
 
 ### Key Findings
 

@@ -128,12 +128,12 @@ Versions are **pinned deliberately**: the saved `joblib` model bundles must dese
 
 ### 5.2 Live data sources (no credentials needed)
 
-| Source                                     | What it provides                                                                                                 | Endpoint                                     |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| **Elering NPS**                            | FI Nord Pool day-ahead prices, 15-min resolution                                                                 | `https://dashboard.elering.ee/api/nps/price` |
-| **FMI** (Finnish Meteorological Institute) | Observations (`place=Helsinki`/`place=Oulu`) + HIRLAM short-range forecast (~54 h, `latlon=` grid interpolation) | `https://opendata.fmi.fi/wfs`                |
-| **Open-Meteo**                             | Long-range hourly forecast (10 forecast days) for the remaining days                                             | `https://api.open-meteo.com/v1/forecast`     |
-| **Fingrid (V3.1, new)**                    | Cross-border grid flows (datasets 55/57/60/61) + nuclear output (dataset 188), 15-min — **requires `FINGRID_API_KEY` env var** | `https://data.fingrid.fi/api/datasets/...` |
+| Source                                     | What it provides                                                                                                               | Endpoint                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| **Elering NPS**                            | FI Nord Pool day-ahead prices, 15-min resolution                                                                               | `https://dashboard.elering.ee/api/nps/price` |
+| **FMI** (Finnish Meteorological Institute) | Observations (`place=Helsinki`/`place=Oulu`) + HIRLAM short-range forecast (~54 h, `latlon=` grid interpolation)               | `https://opendata.fmi.fi/wfs`                |
+| **Open-Meteo**                             | Long-range hourly forecast (10 forecast days) for the remaining days                                                           | `https://api.open-meteo.com/v1/forecast`     |
+| **Fingrid (V3.1, new)**                    | Cross-border grid flows (datasets 55/57/60/61) + nuclear output (dataset 188), 15-min — **requires `FINGRID_API_KEY` env var** | `https://data.fingrid.fi/api/datasets/...`   |
 
 **Station pairing is deliberate**: temperature comes from Helsinki-Vantaa airport and wind from Oulu — the **same stations used in training** — so live features stay consistent with training distributions.
 
@@ -294,17 +294,17 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
 
 ### 9.2 Per-version summary
 
-| Model            | Features        | Train rows | Test MAE   | RMSE       | R²         | Note                                   |
-| ---------------- | --------------- | ---------- | ---------- | ---------- | ---------- | -------------------------------------- |
-| **V1**           | 2 (weather)     | ~21k       | 33.13      | 46.34      | 0.107      | Hourly baseline                        |
-| **V1.5**         | 5 (weather)     | ~84k       | 32.19      | 45.78      | 0.125      | Resolution alone ≈ no gain             |
-| **V2**           | 41 (engineered) | ~21k       | 7.22       | 14.62      | 0.911      | Feature engineering breakthrough       |
-| **V2.5**         | 49 (engineered) | ~84k       | 2.82       | 8.22       | 0.972      | Default XGBoost                        |
-| **V2.5.3**       | 49 (engineered) | ~84k       | 2.7236     | 8.1642     | 0.9722     | **XGBoost + Optuna 30** (production)   |
-| **V3** (XGBoost)   | 62 (+13 grid)   | ~84k       | 2.847      | 8.368      | 0.9708     | Default params — temporary regression  |
-| **V3.1** (XGBoost) | 62 (+13 grid)   | ~84k       | 2.7152     | 8.0699     | 0.9728     | Optuna re-test — grid helps            |
-| **V4** (XGBoost)   | 68 (+6 nuclear) | ~84k       | **2.6993** | **8.0321** | **0.9731** | **Best XGBoost so far** (grid+nuclear) |
-| **V3.1** (LightGBM) | 68 (+19 grid+nuclear) | ~84k | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live** (V2.5 params) |
+| Model               | Features              | Train rows | Test MAE   | RMSE       | R²         | Note                                        |
+| ------------------- | --------------------- | ---------- | ---------- | ---------- | ---------- | ------------------------------------------- |
+| **V1**              | 2 (weather)           | ~21k       | 33.13      | 46.34      | 0.107      | Hourly baseline                             |
+| **V1.5**            | 5 (weather)           | ~84k       | 32.19      | 45.78      | 0.125      | Resolution alone ≈ no gain                  |
+| **V2**              | 41 (engineered)       | ~21k       | 7.22       | 14.62      | 0.911      | Feature engineering breakthrough            |
+| **V2.5**            | 49 (engineered)       | ~84k       | 2.82       | 8.22       | 0.972      | Default XGBoost                             |
+| **V2.5.3**          | 49 (engineered)       | ~84k       | 2.7236     | 8.1642     | 0.9722     | **XGBoost + Optuna 30** (production)        |
+| **V3** (XGBoost)    | 62 (+13 grid)         | ~84k       | 2.847      | 8.368      | 0.9708     | Default params — temporary regression       |
+| **V3.1** (XGBoost)  | 62 (+13 grid)         | ~84k       | 2.7152     | 8.0699     | 0.9728     | Optuna re-test — grid helps                 |
+| **V4** (XGBoost)    | 68 (+6 nuclear)       | ~84k       | **2.6993** | **8.0321** | **0.9731** | **Best XGBoost so far** (grid+nuclear)      |
+| **V3.1** (LightGBM) | 68 (+19 grid+nuclear) | ~84k       | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live** (V2.5 params) |
 
 ### 9.3 Why V2.5 wins
 
@@ -322,24 +322,24 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
 
 ## 10. Experiment History
 
-| #   | Experiment                | Notebook                                                | Setup                                                  | Result                                                | Verdict                                             |
-| --- | ------------------------- | ------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------- |
-| 1   | V1 baseline               | `xgboost_models/modelV1.ipynb`                          | Hourly, weather only                                   | MAE 33.13 / RMSE 46.34 / R² 0.107                     | Baseline                                            |
-| 2   | V1.5 resolution test      | `xgboost_models/modelV1.5.ipynb`                        | 15-min, weather only                                   | MAE 32.19 / R² 0.125                                  | Resolution alone ≈ no gain                          |
-| 3   | V2 feature engineering    | `xgboost_models/modelV2.ipynb`                          | Hourly, engineered                                     | MAE 7.22 / R² 0.911                                   | Breakthrough                                        |
-| 4   | V2.5 best model           | `xgboost_models/modelV2.5.ipynb`                        | 15-min, engineered                                     | MAE 2.82 / RMSE 8.22 / R² 0.972                       | **Best**                                            |
-| 5   | LightGBM V2 & V2.5        | `lightgbm_models/modelV2*.ipynb`                        | Same data, Optuna-tuned LightGBM                       | Slightly better than XGBoost                          | LightGBM tuned ≈ wins                               |
-| 6   | V2.5.2 fair comparison    | `xgboost_models/modelV2.5.2.ipynb`                      | Both Optuna-tuned, MAE loss, 2000 trees, 10×5-fold TSS | XGB MAE 2.7652; **LGBM MAE 2.7167**                   | LightGBM ~1.8% better; much closer than before      |
-| 7   | V2.5.1 risk feature       | `xgboost_models/modelV2.5.1.ipynb`                      | ± `high_volatility_prob`, same data/split/params       | Both models got ~1% **worse**                         | Feature rejected                                    |
-| 8   | V3 grid features (default) | `xgboost_models/modelV3.ipynb`                          | V2.5 + 13 grid, **default params**                     | MAE 2.847 (vs V2.5 2.82) — slightly worse            | Negative result; needs tuning                        |
-| 9   | **V2.5.3 XGBoost Optuna** | `xgboost_models/modelV2.5.3.ipynb`                      | MAE loss, 30 trials × 5-fold TS-CV, 2000 trees         | MAE 2.7236 / RMSE 8.1642 / R² 0.9722                  | **Tuning > new features** — best production XGBoost |
-| 10  | V2.5.1.1 risk re-test     | `xgboost_models/modelV2.5.1.1.ipynb`                    | risk feature under TUNED model                         | +0.0045 (still worse, smaller)                        | Risk feature robustly rejected                      |
-| 11  | V3.1 grid re-test         | `xgboost_models/modelV3.1.ipynb`                        | grid under TUNED model (V2.5.3 params)                 | MAE 2.7152 (Δ −0.0084, helps)                        | **Tune first, then test features**                  |
-| 12  | V3.1_live (grid lags)     | `xgboost_models/modelV3.1_live.ipynb`                   | lag-only grid (55), live-feasible                      | +0.0180 (hurts)                                       | Grid NOT deployable (train/serve gap)               |
-| 13  | Nuclear + V3.1 dataset    | `data/convertData/V3.1_15min_feature_engineering.ipynb` | V3 + 6 nuclear features (shared dataset)               | `V3.1_15min_features.csv` (70 cols)                   | Shared with partner (his LightGBM "V3")             |
-| 14  | **XGBoost V4**            | `xgboost_models/modelV4.ipynb`                          | V3 + nuclear, tuned params                             | **MAE 2.6993 / RMSE 8.0321 / R² 0.9731** (Δ−0.0159)   | **Best XGBoost so far** — nuclear helps             |
-| 15  | **LightGBM V3.1**         | `lightgbm_models/modelV3.1.ipynb`                       | V3.1 dataset (68 feats), Optuna 30×5 then **V2.5 params** | CV 2.8485 → test **2.6390 / 7.8957 / 0.9740** | Optuna overfit; V2.5 regularization transferred — **new best, now live** |
-| 16  | **Grid+nuclear live**     | `src/features.py`, `src/fetch_live.py`, `src/predict_system.py` | GridBuffer/NuclearBuffer + fetch_grid/fetch_nuclear (Fingrid) | `lightgbm_v3_1.pkl` runs daily with real grid/nuclear | Train/serve gap closed (2026-08-25)                  |
+| #   | Experiment                 | Notebook                                                        | Setup                                                         | Result                                                | Verdict                                                                  |
+| --- | -------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| 1   | V1 baseline                | `xgboost_models/modelV1.ipynb`                                  | Hourly, weather only                                          | MAE 33.13 / RMSE 46.34 / R² 0.107                     | Baseline                                                                 |
+| 2   | V1.5 resolution test       | `xgboost_models/modelV1.5.ipynb`                                | 15-min, weather only                                          | MAE 32.19 / R² 0.125                                  | Resolution alone ≈ no gain                                               |
+| 3   | V2 feature engineering     | `xgboost_models/modelV2.ipynb`                                  | Hourly, engineered                                            | MAE 7.22 / R² 0.911                                   | Breakthrough                                                             |
+| 4   | V2.5 best model            | `xgboost_models/modelV2.5.ipynb`                                | 15-min, engineered                                            | MAE 2.82 / RMSE 8.22 / R² 0.972                       | **Best**                                                                 |
+| 5   | LightGBM V2 & V2.5         | `lightgbm_models/modelV2*.ipynb`                                | Same data, Optuna-tuned LightGBM                              | Slightly better than XGBoost                          | LightGBM tuned ≈ wins                                                    |
+| 6   | V2.5.2 fair comparison     | `xgboost_models/modelV2.5.2.ipynb`                              | Both Optuna-tuned, MAE loss, 2000 trees, 10×5-fold TSS        | XGB MAE 2.7652; **LGBM MAE 2.7167**                   | LightGBM ~1.8% better; much closer than before                           |
+| 7   | V2.5.1 risk feature        | `xgboost_models/modelV2.5.1.ipynb`                              | ± `high_volatility_prob`, same data/split/params              | Both models got ~1% **worse**                         | Feature rejected                                                         |
+| 8   | V3 grid features (default) | `xgboost_models/modelV3.ipynb`                                  | V2.5 + 13 grid, **default params**                            | MAE 2.847 (vs V2.5 2.82) — slightly worse             | Negative result; needs tuning                                            |
+| 9   | **V2.5.3 XGBoost Optuna**  | `xgboost_models/modelV2.5.3.ipynb`                              | MAE loss, 30 trials × 5-fold TS-CV, 2000 trees                | MAE 2.7236 / RMSE 8.1642 / R² 0.9722                  | **Tuning > new features** — best production XGBoost                      |
+| 10  | V2.5.1.1 risk re-test      | `xgboost_models/modelV2.5.1.1.ipynb`                            | risk feature under TUNED model                                | +0.0045 (still worse, smaller)                        | Risk feature robustly rejected                                           |
+| 11  | V3.1 grid re-test          | `xgboost_models/modelV3.1.ipynb`                                | grid under TUNED model (V2.5.3 params)                        | MAE 2.7152 (Δ −0.0084, helps)                         | **Tune first, then test features**                                       |
+| 12  | V3.1_live (grid lags)      | `xgboost_models/modelV3.1_live.ipynb`                           | lag-only grid (55), live-feasible                             | +0.0180 (hurts)                                       | Grid NOT deployable (train/serve gap)                                    |
+| 13  | Nuclear + V3.1 dataset     | `data/convertData/V3.1_15min_feature_engineering.ipynb`         | V3 + 6 nuclear features (shared dataset)                      | `V3.1_15min_features.csv` (70 cols)                   | Shared with partner (his LightGBM "V3")                                  |
+| 14  | **XGBoost V4**             | `xgboost_models/modelV4.ipynb`                                  | V3 + nuclear, tuned params                                    | **MAE 2.6993 / RMSE 8.0321 / R² 0.9731** (Δ−0.0159)   | **Best XGBoost so far** — nuclear helps                                  |
+| 15  | **LightGBM V3.1**          | `lightgbm_models/modelV3.1.ipynb`                               | V3.1 dataset (68 feats), Optuna 30×5 then **V2.5 params**     | CV 2.8485 → test **2.6390 / 7.8957 / 0.9740**         | Optuna overfit; V2.5 regularization transferred — **new best, now live** |
+| 16  | **Grid+nuclear live**      | `src/features.py`, `src/fetch_live.py`, `src/predict_system.py` | GridBuffer/NuclearBuffer + fetch_grid/fetch_nuclear (Fingrid) | `lightgbm_v3_1.pkl` runs daily with real grid/nuclear | Train/serve gap closed (2026-08-25)                                      |
 
 ### 10.1 V2.5.2 details (fair XGBoost vs LightGBM)
 
@@ -366,14 +366,14 @@ Results: **LightGBM MAE 2.7167 / RMSE 8.0958 / R² 0.9727** vs **XGBoost MAE 2.7
 
 ### 11.1 Source code (`src/`)
 
-| File                | Purpose                                                                                                             |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| File                | Purpose                                                                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `config.py`         | Runtime config: paths, API URLs, `FORECAST_HOURS=168`, `PRICE_HISTORY_HOURS=200`, **Fingrid dataset IDs + `GRID_HISTORY_HOURS`**, timezone. No hardcoded credentials. |
 | `features.py`       | `build_features()` + `PriceBuffer` + `WeatherBuffer` + **`GridBuffer` + `NuclearBuffer`** — the canonical feature pipeline (now includes V3.1 grid/nuclear features). |
-| `fetch_live.py`     | `fetch_prices()` (Elering) + `fetch_weather()` (FMI + Open-Meteo) + **`fetch_grid()` + `fetch_nuclear()`** (Fingrid, uses `FINGRID_API_KEY`). |
-| `predict_system.py` | Main program: `load_models()`, `run_forecast()`, `fill_actuals()`, `save_csv()`, accuracy summary. Fetches grid + nuclear and passes buffers to every model. |
-| `utils.py`          | Currently **empty** (placeholder).                                                                                  |
-| `test_fmi.py`       | Diagnostic script for FMI WFS endpoint variants (latlon, place, fmisid, bbox, timestep).                            |
+| `fetch_live.py`     | `fetch_prices()` (Elering) + `fetch_weather()` (FMI + Open-Meteo) + **`fetch_grid()` + `fetch_nuclear()`** (Fingrid, uses `FINGRID_API_KEY`).                         |
+| `predict_system.py` | Main program: `load_models()`, `run_forecast()`, `fill_actuals()`, `save_csv()`, accuracy summary. Fetches grid + nuclear and passes buffers to every model.          |
+| `utils.py`          | Currently **empty** (placeholder).                                                                                                                                    |
+| `test_fmi.py`       | Diagnostic script for FMI WFS endpoint variants (latlon, place, fmisid, bbox, timestep).                                                                              |
 
 ### 11.2 Tests (`tests/`)
 
@@ -533,6 +533,7 @@ Earlier price data came from Fingrid dataset 105 (down-regulation bid volume, MW
 The train/serve gap for grid/nuclear features was **closed**: `src/features.py` now has `GridBuffer` + `NuclearBuffer`, `src/fetch_live.py` adds `fetch_grid()`/`fetch_nuclear()` (Fingrid), and `predict_system.py` feeds them to every model. `lightgbm_v3_1.pkl` (which needs those features) is the live proof.
 
 Remaining caveats:
+
 - **Live fallback is forward-fill, not NaN**: both buffers fall back to the last observed value for forecast-period steps (grid flows and nuclear output are assumed stable within a day). This is a deliberate approximation; verify it holds during unusual grid events.
 - **`FINGRID_API_KEY` is now a required live dependency** (GitHub secret `FINGRID_API_KEY`; set it or grid/nuclear features degrade to NaN → LightGBM V3.1 forecasts degrade).
 - XGBoost V3/V4 remain experiments; the live grid/nuclear path was only validated through the LightGBM V3.1 model.
