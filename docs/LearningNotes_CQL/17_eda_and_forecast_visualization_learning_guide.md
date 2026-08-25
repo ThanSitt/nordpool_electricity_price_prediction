@@ -2,8 +2,8 @@
 
 > 对应笔记本（notebook）：
 >
-> - `data_visualization/eda_1.1.ipynb`（EDA，使用最新 V3.1 数据集）
-> - `data_visualization/forecast_visualization.ipynb`（模型评估 + 7天预测）
+> - `data_visualization/2.0_eda.ipynb`（EDA，使用最新 V3.1 数据集）
+> - `data_visualization/2.0_forecast_visualization.ipynb`（模型评估 + 7天预测）
 >
 > 阅读前提：你完全没有 EDA（探索性数据分析）基础，所以本文从零讲起，包括：为什么拆分、EDA 是什么、为什么选这些图、每一行代码是做什么的、每个图该怎么看。
 >
@@ -21,10 +21,10 @@
 
 现在拆成两个，各干各的，理由如下：
 
-| 拆分后                         | 负责什么                   | 用哪个数据集                                           |
-| ------------------------------ | -------------------------- | ------------------------------------------------------ |
-| `eda_1.1.ipynb`                | 只做 EDA（探索性数据分析） | **最新的 V3.1**（70 列，含网格+核电）                  |
-| `forecast_visualization.ipynb` | 模型评估 + 7天预测         | V3.1 数据 + `models/saved/*.pkl` + `predictions/*.csv` |
+| 拆分后                             | 负责什么                   | 用哪个数据集                                           |
+| ---------------------------------- | -------------------------- | ------------------------------------------------------ |
+| `2.0_eda.ipynb`                    | 只做 EDA（探索性数据分析） | **最新的 V3.1**（70 列，含网格+核电）                  |
+| `2.0_forecast_visualization.ipynb` | 模型评估 + 7天预测         | V3.1 数据 + `models/saved/*.pkl` + `predictions/*.csv` |
 
 **为什么拆？**
 
@@ -32,7 +32,7 @@
 - **EDA 要跟着数据走**：现在有了 V3.1 新特征（跨境输电 `fi_*`、核电 `nuclear_*`），EDA 需要重新跑一遍来看这些新特征。
 - **预测可视化要跟着模型/预测结果走**：它每天都要刷新（每天有新的预测 CSV）。
 
-> 我检查过 `docs/LearningNotes_CQL/` 里已有的解释：**10 号指南**（`10_model_visualization_learning_guide.md`）解释了"模型评估 + 未来预测"的概念（英文为主），但**没有逐行讲解代码，也没有讲解 EDA 那 8 张图（1.1–1.8）**。所以本文是新的、更详细的版本——尤其补上了"模型评估这一部分该怎么看"（见第 4 节）。
+> 我检查过 `docs/LearningNotes_CQL/` 里已有的解释：**10 号指南**（`10_model_visualization_learning_guide.md`）已经更新为详细中文版，专门讲解 `2.0_forecast_visualization.ipynb` 的模型评估可视化（为什么做、每张图怎么看、看哪些值、图要不要删、怎么对比模型）。而本文 **17 号指南**聚焦 **EDA 部分** + 模型评估的补充讲解（见第 4 节）。
 
 ---
 
@@ -61,7 +61,7 @@
 
 ---
 
-## 2. `eda_1.1.ipynb` 逐行讲解
+## 2. `2.0_eda.ipynb` 逐行讲解
 
 ### 2.0 Setup（准备工作）——第 2、3 个 cell
 
@@ -393,7 +393,7 @@ show(fig)
 
 ---
 
-## 3. `forecast_visualization.ipynb` 逐行讲解（Setup + 数据准备）
+## 3. `2.0_forecast_visualization.ipynb` 逐行讲解（Setup + 数据准备）
 
 ### 3.0 Setup——第 2、3 个 cell
 
@@ -432,7 +432,7 @@ print(f'Train rows: {train_end:,} | Test rows: {n - train_end:,}')
 ### 3.2 加载模型 + 预测 + 算指标——第 6 个 cell
 
 ```python
-MODEL_NAME = 'xgboost_v2_5'
+MODEL_NAME = 'lightgbm_v3_1'   # 当前默认 = 全项目最好的模型（MAE 2.6390）
 meta = joblib.load(MODELS_DIR / f'{MODEL_NAME}.pkl')
 model = meta['model']
 feature_cols = meta['feature_cols']
@@ -447,7 +447,7 @@ print(f'{MODEL_NAME}: MAE={mae:.4f} | RMSE={rmse:.4f} | R2={r2:.4f}')
 
 **逐行解释：**
 
-- `MODEL_NAME = 'xgboost_v2_5'`：选哪个模型。你可以改成 `lightgbm_v2_5`、`xgboost_v2_5_3` 等（看 `models/saved/` 里有什么）。
+- `MODEL_NAME = 'lightgbm_v3_1'`：选哪个模型（默认 = 全项目最好的 LightGBM V3.1）。想对比就改成 `xgboost_v4`（最好的 XGBoost）、`xgboost_v2_5_3`、`lightgbm_v2_5_2` 等（看 `models/saved/` 里有什么，运行 cell 6 会先列出所有可用模型）。
 - `joblib.load(...)`：读取模型文件（反序列化）。`meta` 是一个**字典**（dictionary），包含三个东西：`model`（模型本体）、`feature_cols`（训练时用的特征列名）、`step_min`（分辨率）。
 - `X_test[feature_cols]`：**只喂模型它训练时用的那些列**（顺序也要对）——如果多传或少传列，预测会错。
 - `model.predict(...)`：在测试集上做预测，得到 `y_pred`（预测值数组）。
@@ -465,7 +465,7 @@ print(f'{MODEL_NAME}: MAE={mae:.4f} | RMSE={rmse:.4f} | R2={r2:.4f}')
 
 ### 4.1 为什么先看模型评估？
 
-在 `forecast_visualization.ipynb` 里，模型评估（Section 1）在前，7 天预测（Section 2）在后。逻辑是：
+在 `2.0_forecast_visualization.ipynb` 里，模型评估（Section 1）在前，7 天预测（Section 2）在后。逻辑是：
 
 - **评估**：拿"历史数据里模型没见过的最后 20%"来考它（像期末考），看它准不准。
 - **预测**：如果考试合格，才相信它对"未来 7 天"的预测。

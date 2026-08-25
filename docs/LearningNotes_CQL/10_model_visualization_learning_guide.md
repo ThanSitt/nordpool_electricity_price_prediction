@@ -1,202 +1,218 @@
-# 10 Model & Forecast Visualization — Learning Guide
+# 10 模型评估与预测可视化 — 详细中文学习指南
 
-> Corresponding notebook: `notebooks/model_visualization.ipynb`
-> This guide explains, step by step, WHY each part of the code is written and HOW it works.
-> Technical terms (专业术语) are annotated with Chinese (中文) so you can learn both languages at once.
-
----
-
-## 0. The Big Picture (整体思路)
-
-The trained model files (`.pkl`, 模型文件) are like "frozen brains". This notebook does TWO things:
-
-| Part | English               | 中文        | Goal (目标)                                                  |
-| ---- | --------------------- | ----------- | ------------------------------------------------------------ |
-| A    | Model Evaluation      | 模型评估    | Prove the model is trustworthy on HISTORICAL data (历史数据) |
-| B    | Future 7-Day Forecast | 未来7天预测 | Show what the model predicts for the NEXT 7 days (未来7天)   |
-
-Why both? First prove the model works (A), then trust its forecast (B). This is the professional workflow.
+> 对应笔记本（notebook）：`data_visualization/2.0_forecast_visualization.ipynb`
+> 阅读前提：你已经训练好模型（`models/saved/*.pkl`），并跑过 `src/predict_system.py` 生成每日预测（`predictions/*.csv`）。
+> 本文是**中文为主**的详细讲解，回答四个问题：①为什么做模型评估可视化？②每张图该怎么看、看哪些值？③这些图有没有用、能不能删？④模型评估评估的是不是"最好的模型"？并且逐 cell 解释"为什么要运行每个 cell"。
+> 词汇说明：专业词/生词用括号标注英文原文。
 
 ---
 
-## Part A — Model Evaluation (模型评估)
+## 0. 这个笔记本是干什么的？（整体思路）
 
-### A0. Imports (导入库)
+训练好的模型文件（`.pkl`）就像一个"冷冻的大脑"。这个笔记本做两件事：
 
-```python
-import numpy as np
-import pandas as pd
-import joblib
-from pathlib import Path
-import plotly.express as px
-import plotly.graph_objects as go
-from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-```
+| 部分      | 英文             | 中文        | 目标                                              |
+| --------- | ---------------- | ----------- | ------------------------------------------------- |
+| Section 1 | Model Evaluation | 模型评估    | 在历史数据（test set）上证明模型靠不靠谱          |
+| Section 2 | 7-Day Forecast   | 未来7天预测 | 展示模型对接下来 7 天（672 个 15 分钟时段）的预测 |
 
-- `joblib` — to LOAD (加载) the saved `.pkl` model files (deserialize, 反序列化)
-- `plotly.express (px)` — quick interactive charts (交互式图表)
-- `plotly.graph_objects (go)` — low-level control (e.g. adding extra lines)
-- `sklearn.metrics` — to compute MAE / RMSE / R² (评估指标)
-- `Path` — to build file paths safely across Windows/macOS/Linux (跨平台路径)
-
-### A0b. Load features + chronological split (加载数据 + 按时间切分)
-
-```python
-df['datetime'] = pd.to_datetime(df['datetime'], utc=True).dt.tz_convert('Europe/Helsinki')
-...
-X_test  = X.iloc[train_end:]
-y_test  = y.iloc[train_end:]
-```
-
-WHY (为什么):
-
-1. **Timezone fix (时区修复)** — the CSV has mixed offsets (mixed timezones, 混合时区: +02:00 winter / +03:00 summer). `utc=True` unifies them first, then we convert to Helsinki time. (This is the exact bug we fixed before.)
-2. **Chronological split (按时间切分)** — `test_size = 20%`, take the LAST 20% as the test set. We NEVER shuffle (打乱), because time-series data must keep time order — the future must not leak into the past (data leakage, 数据泄漏).
-3. The last 20% = the most recent period = a fair "exam" the model has never seen during training (训练时没见过).
-
-### A0c. Load model + predict + metrics (加载模型 + 预测 + 指标)
-
-```python
-meta = joblib.load(MODELS_DIR / f'{model_name}.pkl')
-model = meta['model']
-feature_cols = meta['feature_cols']
-y_pred = model.predict(X_test[feature_cols])
-```
-
-WHY:
-
-1. `joblib.load` opens the saved model bundle (模型文件). The bundle contains 3 things: `model`, `feature_cols`, `step_min` (we saw this in an earlier guide).
-2. `X_test[feature_cols]` — we feed the model ONLY the columns it was trained on (特征列). If we passed extra/missing columns, the prediction would be wrong.
-3. Metrics (指标):
-   - **MAE (平均绝对误差)** = average |actual − predicted|
-   - **RMSE (均方根误差)** = sqrt of mean squared error (punishes big errors more)
-   - **R² (决定系数)** = fraction of price variance explained (0~1, closer to 1 is better)
-
-### A1. Actual vs Predicted — Time Series (时间序列折线图)
-
-```python
-steps = 7 * 24 * 4   # 7 days * 24 h * 4 quarters = 672 points
-fig.add_trace(go.Scatter(x=test_dt[:steps], y=y_test[:steps], name='Actual'))
-fig.add_trace(go.Scatter(x=test_dt[:steps], y=y_pred[:steps], name='Predicted'))
-```
-
-WHY: drawing real price and predicted price together over the first 7 days of the test set. If the two lines track each other, the model is reliable (可靠). We show only 7 days so the lines are readable (too many points would look like a solid blur).
-
-### A2. Actual vs Predicted — Scatter Plot (散点图)
-
-```python
-idx = rng.choice(len(y_test), size=20000, replace=False)   # sample (抽样) for speed
-fig = px.scatter(x=y_test.values[idx], y=y_pred[idx], opacity=0.3)
-lims = [min(...), max(...)]
-fig.add_trace(go.Scatter(x=lims, y=lims, name='Perfect fit (y=x)', ...))
-```
-
-WHY:
-
-- One point per test sample. X = actual, Y = predicted.
-- The red **identity line (y=x, 对角线参照线)** is "perfect prediction". Points near it = good. Above it = over-predict (预测过高); below = under-predict.
-- `opacity=0.3` (透明度) because thousands of overlapping points would hide density. `sample` keeps the interactive chart fast (21k points is heavy).
-
-### A3. Residual Distribution (残差分布直方图)
-
-```python
-residuals = y_test.values - y_pred     # residual (残差) = actual - predicted
-fig = px.histogram(residuals, nbins=80)
-fig.add_vline(x=0, ...)                # zero line (0线)
-```
-
-WHY:
-
-- Residual (残差) = prediction error at each point.
-- A good model: residuals centered near 0 (mean ≈ 0) and spread symmetrically (对称). We got `mean=0.095`, which is very close to 0 → no systematic bias (系统性偏差).
-- A long tail (长尾巴) means the model sometimes makes big errors (e.g. during price spikes, 价格尖峰).
-
-### A4. Feature Importance (特征重要性)
-
-```python
-imp = pd.Series(model.feature_importances_, index=feature_cols).sort_values()
-fig = px.bar(imp.tail(20), orientation='h', ...)
-```
-
-WHY: XGBoost/LightGBM can tell us which input features (特征) they rely on most. This explains WHAT drives the price, and guides future feature engineering (特征工程). `tail(20)` shows the top 20.
+为什么先评估再预测？**先证明模型在"开卷考试"里及格，才敢信它对未来的预测**。这是专业流程。
 
 ---
 
-## Part B — Future 7-Day Forecast (未来7天预测)
+## 1. 模型评估评估的是"最好的模型"吗？（先回答你的问题）
 
-### B0. Load forecast CSVs (加载预测结果)
-
-```python
-for path in sorted(PREDICTIONS_DIR.glob('*_forecasts.csv')):
-    f = pd.read_csv(path, parse_dates=['run_date', 'target_datetime'])
-    ...
-```
-
-WHY: The daily forecast is generated by `src/predict_system.py`, which loads the SAME `.pkl` models and saves one CSV per model into `predictions/`. So these CSVs ARE "the model's 7-day forecast". We just read them — no need to re-run the heavy prediction.
-
-Each CSV has:
-| Column | 中文 | Meaning |
-| --- | --- | --- |
-| `run_date` | 运行日期 | when the forecast was made |
-| `target_datetime` | 目标时间 | the predicted time slot |
-| `predicted_price` | 预测价格 | forecasted price |
-| `actual_price` | 真实价格 | real price (backfilled, 回填, once the day passed) |
-| `abs_error` | 绝对误差 | \|actual − predicted\| |
-
-### B1. All models — 7-day forecast (多模型对比)
+**不是固定的。** Section 1 评估的是你在代码里设置的 `MODEL_NAME` 那个模型：
 
 ```python
-for name, f in forecasts.items():
-    latest = f['run_date'].max()               # take this model's newest run
-    f_latest = f[f['run_date'] == latest]
-    fig.add_trace(go.Scatter(x=..., y=f_latest['predicted_price'], name=name))
+MODEL_NAME = 'lightgbm_v3_1'   # 当前默认 = 全项目最好的模型（MAE 2.6390）
 ```
 
-WHY: draw every model's most recent 7-day prediction on one chart. You immediately see which models agree and which is an outlier (离群). Click the legend to show/hide lines (图例交互).
+- 默认值已经改成 **LightGBM V3.1**（`lightgbm_v3_1`）——目前全项目最好的模型。
+- 想评估别的模型，把这一行改成别的名字即可，例如：
+  - `xgboost_v4` —— 最好的 XGBoost（MAE 2.7020）
+  - `xgboost_v2_5_3`、`xgboost_v3`、`lightgbm_v2_5_2` ……（看 `models/saved/` 里有什么）
+- 每次改完 `MODEL_NAME`，**重新运行 Section 1 的 cell**，所有图和指标都会变成那个模型的。
+- 所以"模型评估"不是"评估最好的模型"，而是"**评估你指定的模型**"；默认给到最好的，方便你验证 README 里的数字。
 
-### B2. Best model forecast vs actual (最佳模型对比真实)
-
-```python
-name = 'xgboost_v2_5'                          # best model per README
-...
-actual = f_latest.dropna(subset=['actual_price'])
-if not actual.empty:
-    fig.add_trace(go.Scatter(..., name='Actual (backfilled)', ...))
-```
-
-WHY: overlay the REAL price (black dashed line) once it becomes available. After a few days you can visually judge how accurate this week's forecast was. `dropna` removes time slots whose actual price isn't published yet (还没公布).
+> 现在 `models/saved/` 里有 12 个 `.pkl`；`predictions/` 里有 13 个 `*_forecasts.csv`（其中 `xgboost_v3_1_enh` 有预测 CSV 但没有 pkl，是历史遗留；Section 2 只是读 CSV，所以不受影响）。
 
 ---
 
-## 5. How to Use (使用方法)
+## 2. 为什么要做模型评估可视化？（为什么 + 为什么运行每个 cell）
 
-1. Run Part A cells first — verify the metrics match the README (e.g. xgboost_v2_5: MAE≈2.8, RMSE≈8.2, R²≈0.97).
-2. Change `model_name = 'xgboost_v2_5'` to any of the 8 saved models (e.g. `lightgbm_v2_5`, `xgboost_v2_5_2`) and re-run Part A to compare.
-3. Re-run Part B whenever `predictions/` gets a new daily run — the charts update automatically.
+### 2.1 光看数字不够，要"看见"错误
+
+模型评估的核心输出其实是三个数字：
+
+- **MAE**（平均绝对误差）= 平均每个点 |真实值 − 预测值|
+- **RMSE**（均方根误差）= 先对误差平方、取平均、再开方（对大错误更敏感）
+- **R²**（决定系数）= 模型能解释价格波动的比例（越接近 1 越好）
+
+但它们只告诉你"平均多准"，**不告诉你"错在哪、什么时候错、是不是系统性偏差"**。可视化就是把这些看不见的信息画出来：
+
+1. **折线图（1.1）** → 看预测跟不跟得上真实走势、什么时候跟不上（尖峰？拐点？）
+2. **散点图（1.2）** → 看整体有没有系统性偏高/偏低、误差主要集中在哪里
+3. **残差直方图（1.3）** → 看误差分布是否以 0 为中心、有没有长尾巴（大错误）
+4. **特征重要性（1.4）** → 看模型靠什么预测（解释性 + 指导特征工程）
+
+### 2.2 为什么要运行每个 cell？（逐 cell 讲解）
+
+笔记本一共 13 个 cell，**必须从上往下按顺序运行**（后面的 cell 依赖前面 cell 产生的变量）。
+
+| Cell | 内容                     | 为什么必须运行                                                                                                                                                 |
+| ---- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | 标题 markdown            | 说明文档，不产生代码                                                                                                                                           |
+| 2    | `## 0. Setup`            | 分区标题                                                                                                                                                       |
+| 3    | 导入库 + 路径配置        | 定义 `DATA_PATH`（V3.1 数据）、`MODELS_DIR`（模型目录）、`PREDICTIONS`（预测目录）、`HELSINKI`（时区）、`show()`（内联显示图的辅助函数）。不运行它后面全用不了 |
+| 4    | `## 1. Model Evaluation` | 分区标题                                                                                                                                                       |
+| 5    | 读数据 + 按时间切分      | 读取 `V3.1_15min_features.csv`，把最后 20% 当测试集（`X_test` / `y_test`）。**按时间顺序切、绝不打乱**（否则未来信息泄漏到过去，data leakage）                 |
+| 6    | 加载模型 + 预测 + 算指标 | 先列出可用模型，再用 `MODEL_NAME` 加载 `.pkl`，用 `X_test[feature_cols]` 预测，打印 MAE / RMSE / R²。**想换模型就改这里**                                      |
+| 7    | 图 1.1 折线图            | 用测试集前 7 天（672 个点）画"真实 vs 预测"                                                                                                                    |
+| 8    | 图 1.2 散点图            | 抽样 20000 个点，横轴真实、纵轴预测，加 y=x 对角线                                                                                                             |
+| 9    | 图 1.3 残差直方图        | 计算 `残差 = 真实 − 预测`，画直方图 + 0 线，打印 mean / std                                                                                                    |
+| 10   | 图 1.4 特征重要性        | 取 top 20 特征画横向条形图                                                                                                                                     |
+| 11   | `## 2. 7-Day Forecast`   | 分区标题                                                                                                                                                       |
+| 12   | 加载预测 CSV             | 读 `predictions/*_forecasts.csv`（`predict_system.py` 每天生成的），打印每个模型的行数和最新 `run_date`                                                        |
+| 13   | 图 2.1 多模型预测        | 把每个模型最近一次 7 天预测画在同一张图上对比                                                                                                                  |
+
+**关键依赖**：cell 7/8/9 用 cell 6 算出的 `y_pred`；cell 13 用 cell 12 读出的 `forecasts`。所以**不要跳着运行**。
 
 ---
 
-## 6. Glossary (术语表 中英对照)
+## 3. 每张图怎么看？（详细）
 
-| English               | 中文          | One-line explanation                         |
-| --------------------- | ------------- | -------------------------------------------- |
-| Model artifact / .pkl | 模型文件      | the saved trained model (joblib)             |
-| Deserialize           | 反序列化      | load a file back into memory (`joblib.load`) |
-| Time-series split     | 时间序列切分  | split by time, never shuffle                 |
-| Data leakage          | 数据泄漏      | future info leaking into training            |
-| Test set              | 测试集        | held-out data the model never trained on     |
-| MAE                   | 平均绝对误差  | average absolute error                       |
-| RMSE                  | 均方根误差    | root mean squared error                      |
-| R² score              | 决定系数      | fraction of variance explained               |
-| Residual              | 残差          | actual − predicted                           |
-| Identity line         | 对角线参照线  | the y = x perfect-fit line                   |
-| Scatter plot          | 散点图        | one dot per sample                           |
-| Histogram             | 直方图        | counts of values in bins                     |
-| Feature importance    | 特征重要性    | how much each feature matters                |
-| Interactive chart     | 交互式图表    | hover / zoom / toggle                        |
-| Backfill              | 回填          | fill actual prices after the day passes      |
-| Outlier               | 离群点/异常值 | a point far from the rest                    |
+### 3.1 图 1.1 实际 vs 预测（时间序列折线图）
+
+**这是什么**：横轴是时间（测试集最开始那 7 天），纵轴是价格（EUR/MWh）。两条线：蓝色 = 真实价格（Actual），另一条 = 预测价格（Predicted）。
+
+**怎么判断好坏**：
+
+- ✅ **两条线几乎重叠** = 好。说明模型每一刻都跟得上真实价格。
+- ⚠️ **有滞后（lag）**：预测线比真实线"慢半拍"，比如真实价格 7:00 冲高，预测 7:15 才跟上 → 说明模型没完全学会"突变"。
+- ⚠️ **尖峰处分叉**：真实价格突然冲到 150，预测只到 80 → 说明模型对"极端情况"（价格尖峰，price spike）预测偏保守。
+- ⚠️ **整体平行但偏高/偏低**：预测线整体比真实高 3 块 → 系统性偏差（bias）。
+
+**看哪些值**：不用读数，用眼睛看"重叠程度"和"分叉的位置"。分叉集中在哪一天、什么时段，往往就是模型最弱的地方。
+
+> 本次运行（lightgbm_v3_1）两条线基本重叠，肉眼几乎看不出分叉——因为 MAE 只有 2.6 块，而价格波动是几十块。
+
+### 3.2 图 1.2 实际 vs 预测（散点图 + 对角线）
+
+**这是什么**：每个测试样本一个点。横轴 = 真实价格，纵轴 = 预测价格。红色对角线是 `y = x`（完美预测线）。
+
+**怎么判断好坏**：
+
+- ✅ **点都挤在红线上** = 好。点越靠近对角线，预测越准。
+- 📈 **点集中在对角线上方** = 系统性高估（over-predict，预测得比实际贵）。
+- 📉 **点集中在对角线下方** = 系统性低估（under-predict）。
+- 🔍 **看两头**：价格高（右边）和价格低（左边）时，点是紧贴对角线还是散开？通常高价区更散（尖峰难预测）。
+
+**和 R² 的关系**：R² 越高，点带越窄。R²=0.974 说明 97.4% 的价格波动被解释，剩下的 2.6% 就是点带的宽度。
+
+**为什么透明度 0.3、抽样 20000**：10 万个点叠一起会糊成黑团；半透明（opacity）+ 抽样（sample）让"密度"（哪些区域点最多）能看出来，同时图还很流畅。
+
+### 3.3 图 1.3 残差分布（直方图）
+
+**这是什么**：把每个点的"误差"（残差 = 真实 − 预测）统计成直方图。0 线是"零误差"。
+
+**怎么判断好坏**：
+
+- ✅ **柱子围绕 0 对称分布、中间高两边低（像钟形）** = 好。说明误差随机、没有系统性偏差。
+- ⚠️ **整体往左/往右偏**（peak 不在 0）= 系统性高估/低估。
+- ⚠️ **长尾巴（long tail）**：两边拖得很长 = 偶尔出现很大的错误（多在价格尖峰时）。
+- **看打印的两个数字**（这个 cell 会打印）：
+  - `Residual mean`（残差均值）→ 越接近 0 越好。本次运行 **mean=0.0762**，非常接近 0 → 基本无偏差。
+  - `Residual std`（标准差）→ 近似等于 RMSE。本次运行 **std=7.8953**，和 RMSE 7.8957 几乎一样（因为均值≈0 时 RMSE≈std）。
+
+**怎么和 1.2 配合**：1.2 看"点离对角线多远"，1.3 看"这些距离的分布长什么样"。1.3 能更快发现"系统性偏差"和"大错误频率"。
+
+### 3.4 图 1.4 特征重要性（横向条形图）
+
+**这是什么**：模型自己报告"最依赖哪些输入特征"。条形越长 = 越重要。
+
+**看什么（本次运行 lightgbm_v3_1 的前几名）**：
+
+- `fi_se_total_lag_96`、`fi_se_total_lag_672`、`fi_ee_lag_672` —— **V3.1 新增的跨境电网特征**（瑞典/爱沙尼亚进出口电量的滞后值）排在最前，说明它们贡献很大。
+- `price_lag_*`（价格滞后特征）—— 昨天/上周同一时刻的价格是强预测因子。
+- `nuclear_change_1d` —— 核电变化量。
+- 这直接回答了"V3.1 新加的电网、核电特征有没有用"——**有用，排进前 20 甚至前 5**。
+
+**有什么用**：① 解释模型在学什么；② 指导下一步特征工程（重要特征附近往往能再挖新特征）；③ 发现垃圾特征（排最后的可以考虑删）。
 
 ---
 
-_This guide corresponds to `notebooks/model_visualization.ipynb`. Key idea: Part A proves the model works (evaluation), Part B shows the model's 7-day forecast — together they answer "can I trust this model to predict the next week?" (我能信任这个模型预测未来一周吗？)_
+## 4. 这些图有用吗？要不要删掉？
+
+| 图             | 主要回答的问题                           | 有用程度 | 建议                       |
+| -------------- | ---------------------------------------- | -------- | -------------------------- |
+| 1.1 折线       | 预测跟不跟得上真实走势                   | 高       | **保留**（最直观）         |
+| 1.2 散点       | 有没有系统性偏高/偏低、整体精度          | 高       | **保留**（R² 的图形化）    |
+| 1.3 残差直方图 | 误差分布是否对称、有无偏差、大错误多不多 | 高       | **保留**（最专业）         |
+| 1.4 特征重要性 | 模型靠什么预测                           | 中高     | **保留**（对特征工程有用） |
+
+**结论**：4 张图各有不可替代的作用，对一个学习项目来说都值得保留。如果嫌多：
+
+- 1.1 和 1.2 信息有重叠（都是"预测 vs 真实"），**二选一优先留 1.1**；
+- 1.4 偏向"解释/特征工程"，如果只关心预测准不准，它是第一个可以删的；
+- 但**不建议删 1.3**——残差图是最专业、最能看出问题的图。
+
+---
+
+## 5. 怎么对比不同模型 / 怎么看出差别？
+
+**方法一：改 MODEL_NAME 重跑**
+
+1. 把 cell 6 的 `MODEL_NAME = 'lightgbm_v3_1'` 改成 `xgboost_v4`，重新运行 cell 6→9。
+2. 对比打印的 MAE / RMSE / R²：MAE 越小越好，R² 越大越好。
+3. 对比 1.2 散点的"点带宽度"、1.3 直方图的"尾巴长度"。同样条件下，更好的模型 = 点带更窄 + 尾巴更短。
+
+**方法二：直接看 Section 2（2.1 多模型对比图）**
+
+- 13 个模型的最近一次 7 天预测画在一张图上，图例（legend）可以点选显示/隐藏某条线。
+- 看哪些模型"抱团"（结论一致）、哪个模型是"离群者"（outlier，和别人差很远）。
+
+**怎么看出"差别"具体看什么值**：以 README 为准，当前各阶段代表模型：
+
+- V1.5（15 分钟 + 天气）：MAE 很大，R² 很低（约 0.12）—— 说明光靠天气特征根本不够。
+- V2.5（加了特征工程后）：MAE 2.82 —— 特征工程带来质变。
+- **V3.1 LightGBM：MAE 2.6390 / RMSE 7.8957 / R² 0.9740（全项目最好）**
+- V4 XGBoost：MAE 2.7020（最好的 XGBoost）
+
+---
+
+## 6. 常见问题（FAQ）
+
+**Q：模型评估的图能保证未来预测也准吗？**
+不能。评估只是在"历史测试集"上证明模型靠谱；未来仍可能遇到没见过的行情（价格体制变化、突发天气）。所以要靠 Section 2 每天刷新预测 + `predictions/*.csv` 里的 `abs_error` 持续监控。
+
+**Q：为什么测试集要按时间切、不打乱？**
+时间序列必须保持时间顺序，否则"未来信息"会泄漏进训练（data leakage），指标会虚高。这里用最后 20% 当测试集 = 让模型考"从没见过的最近时段"。
+
+**Q：为什么 Section 2 不重新跑预测而是读 CSV？**
+`src/predict_system.py` 已经用同样的 `.pkl` 模型每天生成预测并保存到 `predictions/`。直接读 CSV 又快又和线上一致，不用重复跑重的预测。
+
+---
+
+## 7. 术语表（中英对照）
+
+| 英文                         | 中文         | 一句话解释                       |
+| ---------------------------- | ------------ | -------------------------------- |
+| Model Evaluation             | 模型评估     | 在历史数据上检验模型准不准       |
+| Test set                     | 测试集       | 训练时没见过的数据（"开卷考试"） |
+| Time-series split            | 时间序列切分 | 按时间切分、不打乱               |
+| Data leakage                 | 数据泄漏     | 未来信息混进训练，指标虚高       |
+| MAE                          | 平均绝对误差 | 平均 \|真实 − 预测\|             |
+| RMSE                         | 均方根误差   | 对大错误更敏感的误差指标         |
+| R²                           | 决定系数     | 模型解释价格波动的比例（0~1）    |
+| Residual                     | 残差         | 真实 − 预测（每个点的误差）      |
+| Identity line (y=x)          | 对角线参照线 | 完美预测线                       |
+| Over-predict / Under-predict | 高估 / 低估  | 预测高于 / 低于实际              |
+| Outlier                      | 离群点       | 远离大多数数据点的值             |
+| Feature importance           | 特征重要性   | 模型最依赖哪些特征               |
+| Backfill                     | 回填         | 日子过完后补上真实价格           |
+| Interactive chart            | 交互式图表   | 可悬停 / 缩放 / 开关图例         |
+
+---
+
+_对应笔记本：`data_visualization/2.0_forecast_visualization.ipynb`。核心思想：Section 1 证明模型在历史上靠谱（评估），Section 2 展示模型对未来 7 天的预测——两者合起来回答"我能信任这个模型预测未来一周吗？"（can I trust this model to predict the next week?）_
