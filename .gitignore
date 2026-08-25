@@ -24,10 +24,7 @@ venv/
 # Trained model artifacts
 *.pkl
 !models/saved/xgboost_v*.pkl
-!models/saved/lightgbm_v2.pkl
-!models/saved/lightgbm_v2_5.pkl
-!models/saved/lightgbm_v2_5_2.pkl
-!models/saved/lightgbm_v3_1.pkl
+!models/saved/lightgbm_v*.pkl
 *.joblib
 *.model
 *.bin
