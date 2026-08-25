@@ -139,16 +139,128 @@ class WeatherBuffer:
         return float(fn(clean)) if clean else np.nan
 
 
+# ── grid buffer ────────────────────────────────────────────────────────────────
+
+class GridBuffer:
+    """Cross-border power flow history for lag-based feature computation.
+
+    Stores raw corridor values (fi_ee, fi_no, fi_se_north, fi_se_central).
+    Derived features (fi_se_total, fi_total_net, fi_se_abs) are computed
+    on the fly from the raw values.
+
+    For steps beyond the last known timestamp (i.e. the forecast period),
+    both `get_corridor` and `lag_steps` fall back to the last observed value
+    rather than returning NaN.  Grid flows are persistent enough within a day
+    that forward-filling gives better feature quality than NaN.
+    """
+
+    CORRIDORS = ('fi_ee', 'fi_no', 'fi_se_north', 'fi_se_central')
+
+    def __init__(self, df: pd.DataFrame | None = None):
+        self._d: dict[str, dict[pd.Timestamp, float]] = {c: {} for c in self.CORRIDORS}
+        self._last: dict[str, float] = {c: np.nan for c in self.CORRIDORS}
+        if df is not None and not df.empty:
+            for col in self.CORRIDORS:
+                if col in df.columns:
+                    series = df[col].dropna()
+                    for ts, v in series.items():
+                        self._d[col][self._snap(ts)] = float(v)
+                    if not series.empty:
+                        self._last[col] = float(series.iloc[-1])
+
+    @staticmethod
+    def _snap(ts) -> pd.Timestamp:
+        ts = pd.Timestamp(ts)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize(_HELSINKI)
+        else:
+            ts = ts.tz_convert(_HELSINKI)
+        m = (ts.minute // 15) * 15
+        return ts.replace(minute=m, second=0, microsecond=0)
+
+    def get_corridor(self, col: str, ts) -> float:
+        return self._d[col].get(self._snap(ts), self._last[col])
+
+    def lag_steps(self, col: str, ts, steps: int) -> float:
+        key = self._snap(ts) - pd.Timedelta(minutes=15 * steps)
+        return self._d[col].get(key, self._last[col])
+
+    def get_all(self, ts) -> dict:
+        fi_ee         = self.get_corridor('fi_ee', ts)
+        fi_no         = self.get_corridor('fi_no', ts)
+        fi_se_north   = self.get_corridor('fi_se_north', ts)
+        fi_se_central = self.get_corridor('fi_se_central', ts)
+        fi_se_total   = fi_se_north + fi_se_central
+        fi_total_net  = fi_ee + fi_no + fi_se_north + fi_se_central
+        return {
+            'fi_ee':         fi_ee,
+            'fi_no':         fi_no,
+            'fi_se_north':   fi_se_north,
+            'fi_se_central': fi_se_central,
+            'fi_se_total':   fi_se_total,
+            'fi_total_net':  fi_total_net,
+            'fi_se_abs':     abs(fi_se_total),
+        }
+
+
+# ── nuclear buffer ─────────────────────────────────────────────────────────────
+
+class NuclearBuffer:
+    """Nuclear power generation history for lag/rolling feature computation.
+
+    Falls back to the last observed value when a requested timestamp is beyond
+    the known history — nuclear output is very stable (reactors run continuously)
+    so this is a safe approximation for the forecast horizon.
+    """
+
+    def __init__(self, df: pd.DataFrame | None = None):
+        self._d: dict[pd.Timestamp, float] = {}
+        self._last = np.nan
+        if df is not None and not df.empty and 'nuclear_power_mw' in df.columns:
+            series = df['nuclear_power_mw'].dropna()
+            for ts, v in series.items():
+                self._d[self._snap(ts)] = float(v)
+            if not series.empty:
+                self._last = float(series.iloc[-1])
+
+    @staticmethod
+    def _snap(ts) -> pd.Timestamp:
+        ts = pd.Timestamp(ts)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize(_HELSINKI)
+        else:
+            ts = ts.tz_convert(_HELSINKI)
+        m = (ts.minute // 15) * 15
+        return ts.replace(minute=m, second=0, microsecond=0)
+
+    def get(self, ts) -> float:
+        return self._d.get(self._snap(ts), self._last)
+
+    def lag_steps(self, ts, steps: int) -> float:
+        key = self._snap(ts) - pd.Timedelta(minutes=15 * steps)
+        return self._d.get(key, self._last)
+
+    def rolling_steps(self, ts, steps: int, fn) -> float:
+        key = self._snap(ts)
+        vals = [self._d.get(key - pd.Timedelta(minutes=15 * i), self._last)
+                for i in range(1, steps + 1)]
+        clean = [v for v in vals if not np.isnan(v)]
+        return float(fn(clean)) if clean else np.nan
+
+
 # ── feature builder ────────────────────────────────────────────────────────────
 
 def build_features(dt: pd.Timestamp,
                    buf: PriceBuffer,
-                   wx: WeatherBuffer) -> dict:
+                   wx: WeatherBuffer,
+                   grid_buf: GridBuffer | None = None,
+                   nuclear_buf: NuclearBuffer | None = None) -> dict:
     """
     Build a flat dict containing every possible feature for timestamp dt.
 
     Each model selects its own subset using its saved feature_cols list,
-    so one function covers V1 / V1.5 / V2 / V2.5 for both XGBoost and LightGBM.
+    so one function covers V1 / V1.5 / V2 / V2.5 / V3.1 for XGBoost and LightGBM.
+    Pass grid_buf and nuclear_buf for V3.1; older models ignore those features.
     """
     dt = pd.Timestamp(dt)
     if dt.tzinfo is None:
@@ -234,5 +346,47 @@ def build_features(dt: pd.Timestamp,
     f['price_rolling_mean_6h']  = buf.rolling_steps(dt, 24,  np.mean)
     f['price_rolling_mean_7d']  = buf.rolling_steps(dt, 672, np.mean)
     # price_rolling_mean/std/min/max_24h shared with hourly V2 (already set above)
+
+    # grid features (V3.1) — forward-fill last known value for forecast period
+    if grid_buf is not None:
+        f.update(grid_buf.get_all(dt))
+        # Derived lag features computed from raw corridors to match training
+        fi_ee_l96    = grid_buf.lag_steps('fi_ee',         dt, 96)
+        fi_ee_l672   = grid_buf.lag_steps('fi_ee',         dt, 672)
+        fi_se_n_l96  = grid_buf.lag_steps('fi_se_north',   dt, 96)
+        fi_se_c_l96  = grid_buf.lag_steps('fi_se_central', dt, 96)
+        fi_se_n_l672 = grid_buf.lag_steps('fi_se_north',   dt, 672)
+        fi_se_c_l672 = grid_buf.lag_steps('fi_se_central', dt, 672)
+        fi_no_l96    = grid_buf.lag_steps('fi_no',         dt, 96)
+        fi_no_l672   = grid_buf.lag_steps('fi_no',         dt, 672)
+        f['fi_ee_lag_96']          = fi_ee_l96
+        f['fi_ee_lag_672']         = fi_ee_l672
+        f['fi_se_total_lag_96']    = fi_se_n_l96  + fi_se_c_l96
+        f['fi_se_total_lag_672']   = fi_se_n_l672 + fi_se_c_l672
+        f['fi_total_net_lag_96']   = fi_ee_l96  + fi_no_l96  + fi_se_n_l96  + fi_se_c_l96
+        f['fi_total_net_lag_672']  = fi_ee_l672 + fi_no_l672 + fi_se_n_l672 + fi_se_c_l672
+    else:
+        for key in ('fi_ee', 'fi_no', 'fi_se_north', 'fi_se_central',
+                    'fi_se_total', 'fi_total_net', 'fi_se_abs',
+                    'fi_ee_lag_96', 'fi_ee_lag_672',
+                    'fi_se_total_lag_96', 'fi_se_total_lag_672',
+                    'fi_total_net_lag_96', 'fi_total_net_lag_672'):
+            f[key] = np.nan
+
+    # nuclear features (V3.1)
+    if nuclear_buf is not None:
+        nuc_now  = nuclear_buf.get(dt)
+        nuc_l96  = nuclear_buf.lag_steps(dt, 96)
+        f['nuclear_power_mw']         = nuc_now
+        f['nuclear_lag_96']           = nuc_l96
+        f['nuclear_lag_672']          = nuclear_buf.lag_steps(dt, 672)
+        f['nuclear_rolling_mean_24h'] = nuclear_buf.rolling_steps(dt, 96,  np.mean)
+        f['nuclear_rolling_mean_7d']  = nuclear_buf.rolling_steps(dt, 672, np.mean)
+        f['nuclear_change_1d']        = nuc_now - nuc_l96 if not np.isnan(nuc_l96) else np.nan
+    else:
+        for key in ('nuclear_power_mw', 'nuclear_lag_96', 'nuclear_lag_672',
+                    'nuclear_rolling_mean_24h', 'nuclear_rolling_mean_7d',
+                    'nuclear_change_1d'):
+            f[key] = np.nan
 
     return f
