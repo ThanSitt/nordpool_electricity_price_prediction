@@ -86,42 +86,33 @@ import pandas as pd
 
 ```python
 import plotly.express as px
-import plotly.graph_objects as go
-import plotly.io as pio
 ```
 
-- `plotly`（交互式绘图库）的三种导入：
+- `plotly`（交互式绘图库）的导入：
   - `px` = **高级接口**（high-level），一句话就能画常见的图（折线、柱状、散点）。
-  - `go` = **低级接口**（low-level），可以精确控制每一条线、每一个细节。
-  - `pio` = 负责把图**保存成图片文件**（PNG）。
+  - EDA 里只用 `px` 就够了；`plotly.graph_objects`（低级接口 `go`）只在 `forecast_visualization.ipynb` 里用到（因为要精确控制线条）。
 - 交互式（interactive）的意思是：图可以鼠标悬停看数值、缩放、拖拽。
+- **重要**：本项目的图**不再保存成 PNG 文件**，而是直接在笔记本里内联显示（inline）——运行 cell，图就出现在 cell 下方。
 
 ```python
-DATA_PATH   = Path('../data/convertData/V3.1_15min_features.csv')
-CHARTS_DIR  = Path('../charts')
-CHARTS_DIR.mkdir(exist_ok=True)
+DATA_PATH = Path('../data/convertData/V3.1_15min_features.csv')
+
 HELSINKI = 'Europe/Helsinki'
 ```
 
 - `DATA_PATH`：指向**最新的 V3.1 数据集**（这是本次拆分的关键——EDA 用 V3.1 而不是旧的 V2.5）。
-- `CHARTS_DIR`：图片保存目录（`charts/`）。
-- `CHARTS_DIR.mkdir(exist_ok=True)`：创建目录；`exist_ok=True` 表示"如果目录已存在也不报错"（幂等，idempotent）。
 - `HELSINKI`：时区名（timezone），`Europe/Helsinki` 芬兰赫尔辛基时区。
+- 旧版本里还有 `CHARTS_DIR`（图片保存目录）和 `pio.write_image`（保存 PNG 的代码），**现在都删掉了**——因为不需要保存图片文件。
 
 ```python
-def show_and_save(fig, name, width=1200, height=600, scale=2):
-    """Render a figure in the notebook and persist a static PNG into charts/."""
+def show(fig):
+    """Display a figure interactively in the notebook."""
     fig.show()
-    pio.write_image(fig, CHARTS_DIR / f'{name}.png', width=width, height=height, scale=scale)
-    print(f'  saved -> {CHARTS_DIR / f"{name}.png"}')
 ```
 
-- 定义一个**辅助函数**（helper function）`show_and_save`，接收一个图 `fig` 和名字 `name`：
+- 定义一个**辅助函数**（helper function）`show`，接收一个图 `fig`：
   - `fig.show()`：在笔记本里**交互式显示**这个图。
-  - `pio.write_image(...)`：把图**保存成静态 PNG** 到 `charts/` 目录，文件名是 `name.png`。
-  - `width/height` 是图片尺寸（像素，pixel）；`scale=2` 是 2 倍分辨率（清晰度）。
-  - `print(...)`：打印保存路径，方便确认。
-- 这样每张图都"既能在笔记本里看，又能在 `charts/` 里留一份永久副本"。
+- 这样每张图都直接显示在 cell 下方，运行完就能看，不需要打开任何图片文件。
 
 ---
 
@@ -176,7 +167,7 @@ sample = df.sample(n=20000, random_state=42).sort_values('datetime')
 fig = px.line(sample, x='datetime', y='price',
               title='1.1 Electricity Price Over Time (V3.1)',
               labels={'datetime': 'Time', 'price': 'Price (EUR/MWh)'})
-show_and_save(fig, '1.1_price_over_time')
+show(fig)
 ```
 
 **逐行解释：**
@@ -185,7 +176,7 @@ show_and_save(fig, '1.1_price_over_time')
 - `.sort_values('datetime')`：抽样后再按时间排序（否则折线会乱）。
 - `px.line(sample, x='datetime', y='price', ...)`：画**折线图**——横轴（x-axis）是时间，纵轴（y-axis）是价格。
 - `title=...`：图的标题。`labels={...}`：把横轴/纵轴的显示名字改成更友好的（"Time"、"Price (EUR/MWh)"）。
-- `show_and_save(...)`：显示 + 保存。
+- `show(fig)`：在笔记本里交互式显示这个图（不再保存到文件）。
 
 **为什么选折线图？** 因为要看"价格随时间怎么走"——趋势（trend）、波动（volatility）、有没有尖峰（spike）。
 
@@ -202,7 +193,7 @@ show_and_save(fig, '1.1_price_over_time')
 fig = px.histogram(df, x='price', nbins=120, title='1.2 Price Distribution (V3.1)',
                    labels={'price': 'Price (EUR/MWh)', 'count': 'Count'})
 fig.update_layout(showlegend=False)
-show_and_save(fig, '1.2_price_distribution')
+show(fig)
 ```
 
 **逐行解释：**
@@ -224,7 +215,7 @@ show_and_save(fig, '1.2_price_distribution')
 ```python
 fig = px.box(df, x='hour', y='price', title='1.3 Price by Hour of Day (V3.1)',
              labels={'hour': 'Hour', 'price': 'Price (EUR/MWh)'})
-show_and_save(fig, '1.3_price_by_hour')
+show(fig)
 ```
 
 **逐行解释：**
@@ -256,13 +247,13 @@ avg_day = df.groupby('day_name', as_index=False)['price'].mean()
 fig = px.bar(avg_day, x='day_name', y='price', category_orders={'day_name': day_names},
              title='1.4a Average Price by Weekday (V3.1)',
              labels={'day_name': 'Weekday', 'price': 'Avg Price (EUR/MWh)'})
-show_and_save(fig, '1.4a_price_by_weekday')
+show(fig)
 
 avg_month = df.groupby('month', as_index=False)['price'].mean()
 fig = px.bar(avg_month, x='month', y='price',
              title='1.4b Average Price by Month (V3.1)',
              labels={'month': 'Month', 'price': 'Avg Price (EUR/MWh)'})
-show_and_save(fig, '1.4b_price_by_month')
+show(fig)
 ```
 
 **逐行解释：**
@@ -290,12 +281,12 @@ sample = df.sample(n=20000, random_state=42)
 fig = px.scatter(sample, x='temp', y='price', opacity=0.3,
                  title='1.5a Temperature vs Price (V3.1)',
                  labels={'temp': 'Temperature (°C)', 'price': 'Price (EUR/MWh)'})
-show_and_save(fig, '1.5a_temp_vs_price')
+show(fig)
 
 fig = px.scatter(sample, x='wind_speed', y='price', opacity=0.3,
                  title='1.5b Wind Speed vs Price (V3.1)',
                  labels={'wind_speed': 'Wind Speed (m/s)', 'price': 'Price (EUR/MWh)'})
-show_and_save(fig, '1.5b_wind_vs_price')
+show(fig)
 ```
 
 **逐行解释：**
@@ -323,7 +314,7 @@ corr = df[cols].corr()
 fig = px.imshow(corr, text_auto=True, aspect='auto',
                 color_continuous_scale='RdBu_r', zmin=-1, zmax=1,
                 title='1.6 Correlation Heatmap (V3.1)')
-show_and_save(fig, '1.6_correlation_heatmap')
+show(fig)
 ```
 
 **逐行解释：**
@@ -354,12 +345,12 @@ sample = df.sample(n=20000, random_state=42).sort_values('datetime')
 fig = px.line(sample, x='datetime', y='nuclear_power_mw',
               title='1.7a Nuclear Power Output Over Time (V3.1)',
               labels={'datetime': 'Time', 'nuclear_power_mw': 'Nuclear (MW)'})
-show_and_save(fig, '1.7a_nuclear_over_time')
+show(fig)
 
 fig = px.scatter(sample, x='nuclear_power_mw', y='price', opacity=0.3,
                  title='1.7b Nuclear Output vs Price (V3.1)',
                  labels={'nuclear_power_mw': 'Nuclear (MW)', 'price': 'Price (EUR/MWh)'})
-show_and_save(fig, '1.7b_nuclear_vs_price')
+show(fig)
 ```
 
 **逐行解释：** 和前面一样：折线图看核电随时间的变化；散点图看核电和价格的关系。
@@ -381,12 +372,12 @@ fig = px.line(sample, x='datetime', y='fi_total_net',
               title='1.8a Finland Total Net Flow (MW) — positive=export',
               labels={'datetime': 'Time', 'fi_total_net': 'Net Flow (MW)'})
 fig.add_hline(y=0, line_dash='dash', line_color='red')
-show_and_save(fig, '1.8a_fi_total_net')
+show(fig)
 
 fig = px.line(sample, x='datetime', y='fi_ee',
               title='1.8b FI↔Estonia Estlink Flow (MW) — positive=export',
               labels={'datetime': 'Time', 'fi_ee': 'Estlink Flow (MW)'})
-show_and_save(fig, '1.8b_fi_ee')
+show(fig)
 ```
 
 **逐行解释：**
