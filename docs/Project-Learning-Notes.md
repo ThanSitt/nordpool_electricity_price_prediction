@@ -301,9 +301,9 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
 | **V2**              | 41 (engineered)       | ~21k       | 7.22       | 14.62      | 0.911      | Feature engineering breakthrough            |
 | **V2.5**            | 49 (engineered)       | ~84k       | 2.82       | 8.22       | 0.972      | Default XGBoost                             |
 | **V2.5.3**          | 49 (engineered)       | ~84k       | 2.7236     | 8.1642     | 0.9722     | **XGBoost + Optuna 30** (production)        |
-| **V3** (XGBoost)    | 62 (+13 grid)         | ~84k       | 2.847      | 8.368      | 0.9708     | Default params — temporary regression       |
-| **V3.1** (XGBoost)  | 62 (+13 grid)         | ~84k       | 2.7152     | 8.0699     | 0.9728     | Optuna re-test — grid helps                 |
-| **V4** (XGBoost)    | 68 (+6 nuclear)       | ~84k       | **2.6993** | **8.0321** | **0.9731** | **Best XGBoost so far** (grid+nuclear)      |
+| **V3** (XGBoost)    | 62 (+13 grid)         | ~84k       | 2.847      | 8.368      | 0.9708     | Default params — regression; now live       |
+| **V3.1** (XGBoost)  | 62 (+13 grid)         | ~84k       | 2.6982     | 7.9724     | 0.9735     | Optuna re-test — grid helps; now live       |
+| **V4** (XGBoost)    | 68 (+6 nuclear)       | ~84k       | **2.7020** | **8.0376** | **0.9730** | **Best XGBoost — retrained, now live**      |
 | **V3.1** (LightGBM) | 68 (+19 grid+nuclear) | ~84k       | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live** (V2.5 params) |
 
 ### 9.3 Why V2.5 wins
@@ -322,24 +322,25 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
 
 ## 10. Experiment History
 
-| #   | Experiment                 | Notebook                                                        | Setup                                                         | Result                                                | Verdict                                                                  |
-| --- | -------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| 1   | V1 baseline                | `xgboost_models/modelV1.ipynb`                                  | Hourly, weather only                                          | MAE 33.13 / RMSE 46.34 / R² 0.107                     | Baseline                                                                 |
-| 2   | V1.5 resolution test       | `xgboost_models/modelV1.5.ipynb`                                | 15-min, weather only                                          | MAE 32.19 / R² 0.125                                  | Resolution alone ≈ no gain                                               |
-| 3   | V2 feature engineering     | `xgboost_models/modelV2.ipynb`                                  | Hourly, engineered                                            | MAE 7.22 / R² 0.911                                   | Breakthrough                                                             |
-| 4   | V2.5 best model            | `xgboost_models/modelV2.5.ipynb`                                | 15-min, engineered                                            | MAE 2.82 / RMSE 8.22 / R² 0.972                       | **Best**                                                                 |
-| 5   | LightGBM V2 & V2.5         | `lightgbm_models/modelV2*.ipynb`                                | Same data, Optuna-tuned LightGBM                              | Slightly better than XGBoost                          | LightGBM tuned ≈ wins                                                    |
-| 6   | V2.5.2 fair comparison     | `xgboost_models/modelV2.5.2.ipynb`                              | Both Optuna-tuned, MAE loss, 2000 trees, 10×5-fold TSS        | XGB MAE 2.7652; **LGBM MAE 2.7167**                   | LightGBM ~1.8% better; much closer than before                           |
-| 7   | V2.5.1 risk feature        | `xgboost_models/modelV2.5.1.ipynb`                              | ± `high_volatility_prob`, same data/split/params              | Both models got ~1% **worse**                         | Feature rejected                                                         |
-| 8   | V3 grid features (default) | `xgboost_models/modelV3.ipynb`                                  | V2.5 + 13 grid, **default params**                            | MAE 2.847 (vs V2.5 2.82) — slightly worse             | Negative result; needs tuning                                            |
-| 9   | **V2.5.3 XGBoost Optuna**  | `xgboost_models/modelV2.5.3.ipynb`                              | MAE loss, 30 trials × 5-fold TS-CV, 2000 trees                | MAE 2.7236 / RMSE 8.1642 / R² 0.9722                  | **Tuning > new features** — best production XGBoost                      |
-| 10  | V2.5.1.1 risk re-test      | `xgboost_models/modelV2.5.1.1.ipynb`                            | risk feature under TUNED model                                | +0.0045 (still worse, smaller)                        | Risk feature robustly rejected                                           |
-| 11  | V3.1 grid re-test          | `xgboost_models/modelV3.1.ipynb`                                | grid under TUNED model (V2.5.3 params)                        | MAE 2.7152 (Δ −0.0084, helps)                         | **Tune first, then test features**                                       |
-| 12  | V3.1_live (grid lags)      | `xgboost_models/modelV3.1_live.ipynb`                           | lag-only grid (55), live-feasible                             | +0.0180 (hurts)                                       | Grid NOT deployable (train/serve gap)                                    |
-| 13  | Nuclear + V3.1 dataset     | `data/convertData/V3.1_15min_feature_engineering.ipynb`         | V3 + 6 nuclear features (shared dataset)                      | `V3.1_15min_features.csv` (70 cols)                   | Shared with partner (his LightGBM "V3")                                  |
-| 14  | **XGBoost V4**             | `xgboost_models/modelV4.ipynb`                                  | V3 + nuclear, tuned params                                    | **MAE 2.6993 / RMSE 8.0321 / R² 0.9731** (Δ−0.0159)   | **Best XGBoost so far** — nuclear helps                                  |
-| 15  | **LightGBM V3.1**          | `lightgbm_models/modelV3.1.ipynb`                               | V3.1 dataset (68 feats), Optuna 30×5 then **V2.5 params**     | CV 2.8485 → test **2.6390 / 7.8957 / 0.9740**         | Optuna overfit; V2.5 regularization transferred — **new best, now live** |
-| 16  | **Grid+nuclear live**      | `src/features.py`, `src/fetch_live.py`, `src/predict_system.py` | GridBuffer/NuclearBuffer + fetch_grid/fetch_nuclear (Fingrid) | `lightgbm_v3_1.pkl` runs daily with real grid/nuclear | Train/serve gap closed (2026-08-25)                                      |
+| #   | Experiment                          | Notebook                                                        | Setup                                                                         | Result                                                | Verdict                                                                  |
+| --- | ----------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| 1   | V1 baseline                         | `xgboost_models/modelV1.ipynb`                                  | Hourly, weather only                                                          | MAE 33.13 / RMSE 46.34 / R² 0.107                     | Baseline                                                                 |
+| 2   | V1.5 resolution test                | `xgboost_models/modelV1.5.ipynb`                                | 15-min, weather only                                                          | MAE 32.19 / R² 0.125                                  | Resolution alone ≈ no gain                                               |
+| 3   | V2 feature engineering              | `xgboost_models/modelV2.ipynb`                                  | Hourly, engineered                                                            | MAE 7.22 / R² 0.911                                   | Breakthrough                                                             |
+| 4   | V2.5 best model                     | `xgboost_models/modelV2.5.ipynb`                                | 15-min, engineered                                                            | MAE 2.82 / RMSE 8.22 / R² 0.972                       | **Best**                                                                 |
+| 5   | LightGBM V2 & V2.5                  | `lightgbm_models/modelV2*.ipynb`                                | Same data, Optuna-tuned LightGBM                                              | Slightly better than XGBoost                          | LightGBM tuned ≈ wins                                                    |
+| 6   | V2.5.2 fair comparison              | `xgboost_models/modelV2.5.2.ipynb`                              | Both Optuna-tuned, MAE loss, 2000 trees, 10×5-fold TSS                        | XGB MAE 2.7652; **LGBM MAE 2.7167**                   | LightGBM ~1.8% better; much closer than before                           |
+| 7   | V2.5.1 risk feature                 | `xgboost_models/modelV2.5.1.ipynb`                              | ± `high_volatility_prob`, same data/split/params                              | Both models got ~1% **worse**                         | Feature rejected                                                         |
+| 8   | V3 grid features (default)          | `xgboost_models/modelV3.ipynb`                                  | V2.5 + 13 grid, **default params**                                            | MAE 2.847 (vs V2.5 2.82) — slightly worse             | Negative result; needs tuning                                            |
+| 9   | **V2.5.3 XGBoost Optuna**           | `xgboost_models/modelV2.5.3.ipynb`                              | MAE loss, 30 trials × 5-fold TS-CV, 2000 trees                                | MAE 2.7236 / RMSE 8.1642 / R² 0.9722                  | **Tuning > new features** — best production XGBoost                      |
+| 10  | V2.5.1.1 risk re-test               | `xgboost_models/modelV2.5.1.1.ipynb`                            | risk feature under TUNED model                                                | +0.0045 (still worse, smaller)                        | Risk feature robustly rejected                                           |
+| 11  | V3.1 grid re-test                   | `xgboost_models/modelV3.1.ipynb`                                | grid under TUNED model (V2.5.3 params)                                        | MAE 2.6982 (Δ −0.0361, helps)                         | **Tune first, then test features**                                       |
+| 12  | V3.1_live (grid lags)               | `xgboost_models/modelV3.1_live.ipynb`                           | lag-only grid (55), live-feasible                                             | +0.0180 (hurts)                                       | Grid NOT deployable as lag-only (superseded by live grid fetch)          |
+| 13  | Nuclear + V3.1 dataset              | `data/convertData/V3.1_15min_feature_engineering.ipynb`         | V3 + 6 nuclear features (shared dataset)                                      | `V3.1_15min_features.csv` (70 cols)                   | Shared with partner (his LightGBM "V3")                                  |
+| 14  | **XGBoost V4 (retrained)**          | `xgboost_models/modelV4.ipynb`                                  | single 68-feature model, Optuna 30×5, MAE loss                                | **MAE 2.7020 / RMSE 8.0376 / R² 0.9730** (CV 2.9053)  | **Best XGBoost — now live**                                              |
+| 15  | **LightGBM V3.1**                   | `lightgbm_models/modelV3.1.ipynb`                               | V3.1 dataset (68 feats), Optuna 30×5 then **V2.5 params**                     | CV 2.8485 → test **2.6390 / 7.8957 / 0.9740**         | Optuna overfit; V2.5 regularization transferred — **new best, now live** |
+| 16  | **Grid+nuclear live**               | `src/features.py`, `src/fetch_live.py`, `src/predict_system.py` | GridBuffer/NuclearBuffer + fetch_grid/fetch_nuclear (Fingrid)                 | `lightgbm_v3_1.pkl` runs daily with real grid/nuclear | Train/serve gap closed (2026-08-25)                                      |
+| 17  | **XGBoost V3/V3.1_enh/V4 promoted** | commit `0169a85`                                                | moved from `models/experiments/` → `models/saved/` (grid/nuclear now in src/) | 3 new live forecast CSVs (2026-08-25)                 | **All XGBoost grid/nuclear variants now live**                           |
 
 ### 10.1 V2.5.2 details (fair XGBoost vs LightGBM)
 
@@ -385,11 +386,11 @@ Results: **LightGBM MAE 2.7167 / RMSE 8.0958 / R² 0.9727** vs **XGBoost MAE 2.7
 
 ### 11.3 Model artifacts
 
-`models/saved/` — **10 pkls**, all consumed by the live predictor:
+`models/saved/` — **13 pkls**, all consumed by the live predictor:
 
-`xgboost_v1.pkl`, `xgboost_v1_5.pkl`, `xgboost_v2.pkl`, `xgboost_v2_5.pkl`, `xgboost_v2_5_2.pkl`, **`xgboost_v2_5_3.pkl`** (Optuna-tuned), `lightgbm_v2.pkl`, `lightgbm_v2_5.pkl`, `lightgbm_v2_5_2.pkl`, **`lightgbm_v3_1.pkl`** (grid + nuclear — the only live model using those features).
+`xgboost_v1.pkl`, `xgboost_v1_5.pkl`, `xgboost_v2.pkl`, `xgboost_v2_5.pkl`, `xgboost_v2_5_2.pkl`, **`xgboost_v2_5_3.pkl`** (Optuna-tuned), **`xgboost_v3.pkl`**, **`xgboost_v3_1_enh.pkl`**, **`xgboost_v4.pkl`** (grid/nuclear), `lightgbm_v2.pkl`, `lightgbm_v2_5.pkl`, `lightgbm_v2_5_2.pkl`, **`lightgbm_v3_1.pkl`** (grid/nuclear).
 
-`models/experiments/` — XGBoost grid/nuclear experiments, **not live**: `xgboost_v3.pkl`, `xgboost_v3_1.pkl`, `xgboost_v4.pkl`. (Grid/nuclear features ARE now in `src/features.py`; these XGBoost variants simply were never promoted.)
+`models/experiments/` — **removed** (2026-08-25). The XGBoost V3/V3.1_enh/V4 models were promoted to `models/saved/` now that `src/features.py` builds grid/nuclear features. `.gitignore` now uses wildcards: `!models/saved/xgboost_v*.pkl` + `!models/saved/lightgbm_v*.pkl`.
 
 ### 11.4 Predictions (`predictions/`)
 
@@ -399,7 +400,7 @@ One CSV per model (`<name>_forecasts.csv`) with columns: `run_date`, `target_dat
 
 - Data: `data/convertData/*.ipynb` (cleaning, feature engineering, risk feature).
 - Models: `xgboost_models/modelV*.ipynb`, `lightgbm_models/modelV2*.ipynb`, **`lightgbm_models/modelV3.1.ipynb`** (best model).
-- Visualization: `data_visualization/forecast_visualization.ipynb` (interactive Plotly, **no PNG saving** since 2026-08-25), `data_visualization/eda_1.1.ipynb`, `docs/LearningNotes_CQL/model_visualization.ipynb`.
+- Visualization: `data_visualization/1.0_eda_and_forecast_visualization.ipynb`, `data_visualization/2.0_eda.ipynb`, `data_visualization/2.0_forecast_visualization.ipynb` (interactive Plotly, **no PNG saving** since 2026-08-25).
 
 ### 11.6 Docs & automation
 
@@ -470,12 +471,14 @@ schedule: cron '0 11 * * *' (UTC)  # ≈ 13:00/14:00 Finland, after price public
 
 ## 13. Current Project Status
 
-- **10 trained models** live in `models/saved/` — including `xgboost_v2_5_3.pkl` (Optuna-tuned XGBoost) and the new **`lightgbm_v3_1.pkl`**.
-- **Best model overall**: **LightGBM V3.1** (grid + nuclear, MAE 2.6390 / RMSE 7.8957 / R² 0.9740) — the first and only live model using grid/nuclear features; it now runs every day.
-- **Grid + nuclear are LIVE** (2026-08-25): `src/` now fetches Fingrid flows + nuclear via `fetch_grid`/`fetch_nuclear` and builds them with `GridBuffer`/`NuclearBuffer`; the workflow injects `FINGRID_API_KEY` as a secret.
-- **XGBoost experiments** in `models/experiments/`: `xgboost_v3.pkl`, `xgboost_v3_1.pkl`, `xgboost_v4.pkl` (V4 = best XGBoost, MAE 2.6993 — not promoted).
-- **Daily forecasts are running and committing automatically** (git history shows daily updates through 2026-08-24).
-- **Best production XGBoost**: V2.5.3 (MAE 2.7236 / RMSE 8.1642 / R² 0.9722).
+- **13 trained models** live in `models/saved/` — including `xgboost_v2_5_3.pkl` (Optuna-tuned XGBoost), `xgboost_v3.pkl` / `xgboost_v3_1_enh.pkl` / `xgboost_v4.pkl` (grid/nuclear), and `lightgbm_v3_1.pkl`.
+- **Best model overall**: **LightGBM V3.1** (grid + nuclear, MAE 2.6390 / RMSE 7.8957 / R² 0.9740) — runs every day.
+- **Grid + nuclear are LIVE** (2026-08-25): `src/` fetches Fingrid flows + nuclear via `fetch_grid`/`fetch_nuclear` and builds them with `GridBuffer`/`NuclearBuffer`; the workflow injects `FINGRID_API_KEY` as a secret.
+- **XGBoost V3/V3.1_enh/V4 promoted to live** (2026-08-25): all three moved from `models/experiments/` to `models/saved/`; forecast CSVs now generated daily (`xgboost_v3_forecasts.csv`, `xgboost_v3_1_enh_forecasts.csv`, `xgboost_v4_forecasts.csv`).
+- **Best XGBoost**: V4 (retrained, single 68-feature Optuna model, MAE 2.7020 / RMSE 8.0376 / R² 0.9730).
+- **Daily forecasts are running and committing automatically** (git history shows daily updates through 2026-08-25).
+- **Best production XGBoost (earlier)**: V2.5.3 (MAE 2.7236 / RMSE 8.1642 / R² 0.9722).
+- **Visualization notebooks reorganised** (2026-08-25): `1.0_eda_and_forecast_visualization.ipynb`, `2.0_eda.ipynb`, `2.0_forecast_visualization.ipynb` — figures shown inline, no PNGs saved.
 - **Nuclear data done**: `data/originalData/Nuclear/nuclear_measured_15min.csv` (105,216 rows, Fingrid dataset 188).
 - **Grid → src integration REVERTED** (2026-08-14): records in `docs/LearningNotes_CQL/14_grid_src_integration_reverted.md` + `grid_src_integration.patch`.
 - **Unit tests** pass (7) and are enforced in CI before every forecast run.
@@ -530,13 +533,13 @@ Earlier price data came from Fingrid dataset 105 (down-regulation bid volume, MW
 
 ### 14.8 Grid & nuclear features — now LIVE (resolved 2026-08-25)
 
-The train/serve gap for grid/nuclear features was **closed**: `src/features.py` now has `GridBuffer` + `NuclearBuffer`, `src/fetch_live.py` adds `fetch_grid()`/`fetch_nuclear()` (Fingrid), and `predict_system.py` feeds them to every model. `lightgbm_v3_1.pkl` (which needs those features) is the live proof.
+The train/serve gap for grid/nuclear features was **closed**: `src/features.py` now has `GridBuffer` + `NuclearBuffer`, `src/fetch_live.py` adds `fetch_grid()`/`fetch_nuclear()` (Fingrid), and `predict_system.py` feeds them to every model. `lightgbm_v3_1.pkl` and the promoted `xgboost_v3.pkl` / `xgboost_v3_1_enh.pkl` / `xgboost_v4.pkl` all run live with real grid/nuclear features.
 
 Remaining caveats:
 
 - **Live fallback is forward-fill, not NaN**: both buffers fall back to the last observed value for forecast-period steps (grid flows and nuclear output are assumed stable within a day). This is a deliberate approximation; verify it holds during unusual grid events.
-- **`FINGRID_API_KEY` is now a required live dependency** (GitHub secret `FINGRID_API_KEY`; set it or grid/nuclear features degrade to NaN → LightGBM V3.1 forecasts degrade).
-- XGBoost V3/V4 remain experiments; the live grid/nuclear path was only validated through the LightGBM V3.1 model.
+- **`FINGRID_API_KEY` is now a required live dependency** (GitHub secret `FINGRID_API_KEY`; set it or grid/nuclear features degrade to NaN → LightGBM V3.1 / XGBoost V3.1_enh / V4 forecasts degrade).
+- **`xgboost_v3.pkl` (default params) is live despite being a regression** — it was promoted alongside the tuned models; it is the weakest of the fleet and a candidate for retirement.
 
 ---
 
@@ -550,9 +553,9 @@ Remaining caveats:
 
 ### Features & experiments
 
-- **Promote XGBoost V4 (MAE 2.6993) or keep LightGBM V3.1 (MAE 2.6390) as the single production model** — grid/nuclear features are now live, so promotion is feasible.
+- **Consolidate the 13-model live fleet** — several models are near-duplicates (V3/V3.1_enh/V4 and V2.5/V2.5.3); track live MAE per model and retire the weakest (e.g. default-param `xgboost_v3`).
 - **Validate the forward-fill fallback** in `GridBuffer`/`NuclearBuffer` during high-volatility grid periods; consider raising instead of silently carrying the last value.
-- **Monitor LightGBM V3.1's live error** once it accumulates evaluated rows — it's the first model exercising the new live Fingrid path.
+- **Monitor the newly-live models' error** (V3/V3.1_enh/V4, LightGBM V3.1) once they accumulate evaluated rows — they exercise the new live Fingrid path.
 - **Strengthen the high-volatility classifier** (class imbalance via `scale_pos_weight`, more features) then re-run the V2.5.1 test.
 - Apply the two-level feature validation (signal check → controlled model test) to any new candidate feature.
 
