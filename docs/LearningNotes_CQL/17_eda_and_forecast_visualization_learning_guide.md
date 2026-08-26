@@ -505,7 +505,7 @@ print(f'{MODEL_NAME}: MAE={mae:.4f} | RMSE={rmse:.4f} | R2={r2:.4f}')
 
 ---
 
-## 5. 7-Day Forecast（7天预测）——怎么看（第 12–14 个 cell）
+## 5. 7-Day Forecast（7天预测）——怎么看（第 12–13 个 cell）
 
 ### 5.1 预测 CSV 从哪来？
 
@@ -564,20 +564,59 @@ for name, f in forecasts.items():
 2. 如果某条线明显偏离大多数 → 那个模型可能有问题或风格不同。
 3. 交互式图：点图例（legend）可以单独显示/隐藏某条线。
 
-### 5.4 图 2.2 最佳模型 vs 真实价——第 14 个 cell
+### 5.4 最新版本变化：默认只保留 2.1 All Models 图
+
+你现在这个最新版 `2.0_forecast_visualization.ipynb`，Section 2 默认只保留了：
+
+- `2.1 7-Day Forecast - All Models`
+
+也就是说，notebook 里不再默认画“单模型预测线 + 实际线”的 2.2 图。
+
+这并不是功能退化，而是职责更清晰：
+
+- 2.1 用来做多模型横向对比（forecast spread）
+- `actual_price` 对比通常放在后评估或单独扩展 cell
+
+如果你课堂上要演示“预测 vs 实际”，可以在 Section 2 后手动加一个 cell（见下）。
+
+### 5.5 如何在最新版里补上 `actual_price` 对比（推荐加分演示）
 
 ```python
-name = 'xgboost_v2_5'
-f_latest = f[f['run_date'] == f['run_date'].max()]
-fig.add_trace(... predicted ...)
+import plotly.graph_objects as go
+
+name = 'lightgbm_v3_1'  # 也可以改成 xgboost_v4
+f = forecasts[name]
+f_latest = f[f['run_date'] == f['run_date'].max()].copy()
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+  x=f_latest['target_datetime'],
+  y=f_latest['predicted_price'],
+  name=f'{name} Predicted',
+  mode='lines'
+))
+
 actual = f_latest.dropna(subset=['actual_price'])
 if not actual.empty:
-    fig.add_trace(... actual (black dashed) ...)
+  fig.add_trace(go.Scatter(
+    x=actual['target_datetime'],
+    y=actual['actual_price'],
+    name='Actual',
+    mode='lines',
+    line=dict(color='black', dash='dash')
+  ))
+
+fig.update_layout(
+  title=f'Forecast vs Actual ({name})',
+  xaxis_title='Time',
+  yaxis_title='Price (EUR/MWh)'
+)
+fig.show()
 ```
 
 **逐行解释：**
 
-- 默认看最佳模型 `xgboost_v2_5`（你也可以改）。
+- 默认示例看 `lightgbm_v3_1`（你也可以改成 `xgboost_v4`）。
 - `dropna(subset=['actual_price'])`：**删掉** `actual_price` 为空的行（这些时刻的真实价还没公布）。
 - 如果已有真实价（`actual` 非空），就加一条**黑色虚线**叠上去。
 
