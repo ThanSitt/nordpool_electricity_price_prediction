@@ -32,17 +32,18 @@ Live:       APIs → Build Features → Load Saved Model → Predict 7 Days → 
 
 ## Model Versions
 
-| Model             | Features                                           | Test MAE   | RMSE       | R²         | Description                           |
-| ----------------- | -------------------------------------------------- | ---------- | ---------- | ---------- | ------------------------------------- |
-| V1                | Weather only (temp, wind)                          | 33.13      | 46.34      | 0.107      | Hourly weather-only baseline          |
-| V1.5              | Weather only (temp, wind, direction)               | 32.19      | 45.78      | 0.125      | 15-min weather-only baseline          |
-| V2                | Full engineered (lags, rolling, calendar, holiday) | 7.22       | 14.62      | 0.911      | Hourly + feature engineering          |
-| V2.5              | Full engineered (49)                               | 2.82       | 8.22       | 0.972      | 15-min + engineered (default XGBoost) |
-| V2.5.3            | Full engineered (49), Optuna-tuned                 | 2.7236     | 8.1642     | 0.9722     | Best production XGBoost               |
-| V3 (XGBoost)      | + grid flows (62), default params                  | 2.847      | 8.368      | 0.971      | Grid hurt at default                  |
-| V3.1 (XGBoost)    | + grid flows (62), Optuna-tuned                    | 2.6982     | 7.9724     | 0.9735     | Grid helps under tuned model — live   |
-| **V4 (XGBoost)**  | + grid + nuclear (68), **Optuna-tuned**            | **2.7020** | **8.0376** | **0.9730** | **Best XGBoost — live**               |
-| **LightGBM V3.1** | + grid + nuclear (68), **V2.5 params**             | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live**         |
+| Model                                  | Features                                           | Test MAE   | RMSE       | R²         | Description                                               |
+| -------------------------------------- | -------------------------------------------------- | ---------- | ---------- | ---------- | --------------------------------------------------------- |
+| **Naive Baseline (Yesterday's Price)** | None (persistence: 24 h same slot)                 | 31.72      | 51.19      | −0.09      | No-ML baseline; same V3.1 15-min test set as V3.1/V4 rows |
+| V1                                     | Weather only (temp, wind)                          | 33.13      | 46.34      | 0.107      | Hourly weather-only baseline                              |
+| V1.5                                   | Weather only (temp, wind, direction)               | 32.19      | 45.78      | 0.125      | 15-min weather-only baseline                              |
+| V2                                     | Full engineered (lags, rolling, calendar, holiday) | 7.22       | 14.62      | 0.911      | Hourly + feature engineering                              |
+| V2.5                                   | Full engineered (49)                               | 2.82       | 8.22       | 0.972      | 15-min + engineered (default XGBoost)                     |
+| V2.5.3                                 | Full engineered (49), Optuna-tuned                 | 2.7236     | 8.1642     | 0.9722     | Best production XGBoost                                   |
+| V3 (XGBoost)                           | + grid flows (62), default params                  | 2.847      | 8.368      | 0.971      | Grid hurt at default                                      |
+| V3.1 (XGBoost)                         | + grid flows (62), Optuna-tuned                    | 2.6982     | 7.9724     | 0.9735     | Grid helps under tuned model — live                       |
+| **V4 (XGBoost)**                       | + grid + nuclear (68), **Optuna-tuned**            | **2.7020** | **8.0376** | **0.9730** | **Best XGBoost — live**                                   |
+| **LightGBM V3.1**                      | + grid + nuclear (68), **V2.5 params**             | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live**                             |
 
 ### Key Findings
 
@@ -50,6 +51,17 @@ Live:       APIs → Build Features → Load Saved Model → Predict 7 Days → 
 2. **Feature engineering (V1 → V2) is the real breakthrough** — R² 0.107 → 0.911. Lag features, rolling statistics, and calendar features capture the autoregressive nature of electricity prices.
 3. **Both combined (V2 → V2.5) gives the best result** — R² 0.911 → 0.972, RMSE drops from 14.62 to 8.22.
 4. **Then tuning beats more features** — Optuna tuning (V2.5.3) beat adding grid features alone: V3 (default params) was a temporary **regression** (MAE 2.847), but re-testing the same grid features under the tuned model (V3.1) **helped** (MAE 2.6982). Adding real supply-side data (nuclear) gives V4, the best XGBoost so far (MAE 2.7020). **All of these are now live** in `models/saved/`, alongside the best model overall — LightGBM V3.1 (MAE 2.6390).
+
+### True 7-day recursive evaluation (honest multi-step)
+
+The `Test MAE` column above is the **single-step (15-min ahead)** score — each test row uses the _true_ previous 15-min price. Real 7-day operation cannot do that. To disclose an honest figure, `data_visualization/3.0_7day_recursive_backtest.ipynb` re-tests the two newest models by **recursively forecasting each 7-day window (672 × 15-min) without feeding any real price inside the window** (31 non-overlapping windows covering the whole held-out 2025 test set):
+
+| Model         | Single-step MAE | 7-day recursive MAE | 7-day recursive RMSE | Naive_7d MAE | Beats Naive_7d? |
+| ------------- | --------------- | ------------------- | -------------------- | ------------ | --------------- |
+| LightGBM V3.1 | 2.6390          | 37.29               | 59.77                | 40.06        | Yes             |
+| XGBoost V4    | 2.7020          | 32.12               | 46.08                | 40.06        | Yes             |
+
+> **Honest summary:** single-step (15-min ahead) reached **2.64 MAE** (LightGBM V3.1), while the **7-day recursive forecast MAE is 32.12** (XGBoost V4; RMSE 46.08) — still below a persistence `Naive_7d` (40.06), but the ~12× gap to the single-step number shows how fast errors accumulate over 672 recursive steps. Method + caveats (exogenous weather/grid/nuclear taken as realized; price lags rebuilt exactly as in training) are documented in the notebook.
 
 ---
 

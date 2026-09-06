@@ -294,17 +294,18 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
 
 ### 9.2 Per-version summary
 
-| Model               | Features              | Train rows | Test MAE   | RMSE       | R²         | Note                                        |
-| ------------------- | --------------------- | ---------- | ---------- | ---------- | ---------- | ------------------------------------------- |
-| **V1**              | 2 (weather)           | ~21k       | 33.13      | 46.34      | 0.107      | Hourly baseline                             |
-| **V1.5**            | 5 (weather)           | ~84k       | 32.19      | 45.78      | 0.125      | Resolution alone ≈ no gain                  |
-| **V2**              | 41 (engineered)       | ~21k       | 7.22       | 14.62      | 0.911      | Feature engineering breakthrough            |
-| **V2.5**            | 49 (engineered)       | ~84k       | 2.82       | 8.22       | 0.972      | Default XGBoost                             |
-| **V2.5.3**          | 49 (engineered)       | ~84k       | 2.7236     | 8.1642     | 0.9722     | **XGBoost + Optuna 30** (production)        |
-| **V3** (XGBoost)    | 62 (+13 grid)         | ~84k       | 2.847      | 8.368      | 0.9708     | Default params — regression; now live       |
-| **V3.1** (XGBoost)  | 62 (+13 grid)         | ~84k       | 2.6982     | 7.9724     | 0.9735     | Optuna re-test — grid helps; now live       |
-| **V4** (XGBoost)    | 68 (+6 nuclear)       | ~84k       | **2.7020** | **8.0376** | **0.9730** | **Best XGBoost — retrained, now live**      |
-| **V3.1** (LightGBM) | 68 (+19 grid+nuclear) | ~84k       | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live** (V2.5 params) |
+| Model                                  | Features                           | Train rows | Test MAE   | RMSE       | R²         | Note                                        |
+| -------------------------------------- | ---------------------------------- | ---------- | ---------- | ---------- | ---------- | ------------------------------------------- |
+| **Naive Baseline (Yesterday's Price)** | None (persistence: 24 h same slot) | —          | 31.72      | 51.19      | −0.09      | No-ML baseline; same V3.1 15-min test set   |
+| **V1**                                 | 2 (weather)                        | ~21k       | 33.13      | 46.34      | 0.107      | Hourly baseline                             |
+| **V1.5**                               | 5 (weather)                        | ~84k       | 32.19      | 45.78      | 0.125      | Resolution alone ≈ no gain                  |
+| **V2**                                 | 41 (engineered)                    | ~21k       | 7.22       | 14.62      | 0.911      | Feature engineering breakthrough            |
+| **V2.5**                               | 49 (engineered)                    | ~84k       | 2.82       | 8.22       | 0.972      | Default XGBoost                             |
+| **V2.5.3**                             | 49 (engineered)                    | ~84k       | 2.7236     | 8.1642     | 0.9722     | **XGBoost + Optuna 30** (production)        |
+| **V3** (XGBoost)                       | 62 (+13 grid)                      | ~84k       | 2.847      | 8.368      | 0.9708     | Default params — regression; now live       |
+| **V3.1** (XGBoost)                     | 62 (+13 grid)                      | ~84k       | 2.6982     | 7.9724     | 0.9735     | Optuna re-test — grid helps; now live       |
+| **V4** (XGBoost)                       | 68 (+6 nuclear)                    | ~84k       | **2.7020** | **8.0376** | **0.9730** | **Best XGBoost — retrained, now live**      |
+| **V3.1** (LightGBM)                    | 68 (+19 grid+nuclear)              | ~84k       | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live** (V2.5 params) |
 
 ### 9.3 Why V2.5 wins
 
@@ -318,29 +319,51 @@ V1 (hourly, weather-only)          V1.5 (15-min, weather-only)
 - RMSE (8.22) ≈ 3× MAE (2.82) → some large errors remain, typically during **extreme price spikes** (actual prices range 0–150 EUR/MWh; std ≈ 36).
 - The RMSE/MAE gap is smaller than V2's (14.62 vs 7.22), so V2.5 handles volatile periods better.
 
+### 9.5 True 7-day recursive evaluation (real multi-step, 2026-09-06)
+
+`Test MAE` 列全是**单步（15-min ahead）**：每个测试样本都用了真实的上一刻价格。真正的 7 天使用做不到这一点。
+`data_visualization/3.0_7day_recursive_backtest.ipynb` 在保留测试集上对两个最新模型做**真正的 7 天（672×15-min）递归预测**：每个不重叠的 7 天窗口内**不喂真实电价**（第 1 步只用窗口前的历史，之后把上一步预测值喂回价格滞后/滚动特征），共 31 个窗口覆盖整个测试集。
+
+| Model         | Single-step MAE | 7-day recursive MAE | recursive RMSE | Naive_7d MAE | Beats Naive_7d? |
+| ------------- | --------------- | ------------------- | -------------- | ------------ | --------------- |
+| LightGBM V3.1 | 2.6390          | 37.29               | 59.77          | 40.06        | Yes             |
+| XGBoost V4    | 2.7020          | 32.12               | 46.08          | 40.06        | Yes             |
+
+**可引用切分句**：单步预测（15-min ahead）达到了 2.64 MAE（LightGBM V3.1），而 7 天递归预测的 MAE 为 32.12（XGBoost V4，RMSE 46.08）。
+
+要点 / 局限（这是本地测试集口径，区别于 §14.1 的“线上”递归）：
+
+- 价格滞后/滚动特征按训练公式重建（`shift` / `shift(1).rolling(W)`，std 用 `ddof=1`），与训练 CSV 逐值一致（max diff ~1e-9，notebook 有健全性检查）。
+- 外生（天气/电网/核电）取 CSV 已实现值 = “完美外生预测”，与单步评估同一口径 → 单步 vs 递归的差距**纯粹来自价格自回归误差累积**。
+- 天气列在 2025 测试区有约 20 行缺失 → 整表 ffill/bfill 缺口填充。
+- 两个模型 7 天递归都**跑赢 Naive_7d**（上周同 slot，MAE 40.06），但递归 MAE（32–37）远高于单步（2.6–2.7）；LGBM 单步更优但递归累积更差（RMSE 59.8 vs 46.1）。
+- `src/features.py` 的 `build_features()` 与训练表存在 `season` 映射、rolling-std 的 `ddof`、电网对齐等细微 train/serve 偏差（见该 notebook 附录 A），故本回测不复用它重建。
+
 ---
 
 ## 10. Experiment History
 
-| #   | Experiment                          | Notebook                                                        | Setup                                                                         | Result                                                | Verdict                                                                  |
-| --- | ----------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| 1   | V1 baseline                         | `xgboost_models/modelV1.ipynb`                                  | Hourly, weather only                                                          | MAE 33.13 / RMSE 46.34 / R² 0.107                     | Baseline                                                                 |
-| 2   | V1.5 resolution test                | `xgboost_models/modelV1.5.ipynb`                                | 15-min, weather only                                                          | MAE 32.19 / R² 0.125                                  | Resolution alone ≈ no gain                                               |
-| 3   | V2 feature engineering              | `xgboost_models/modelV2.ipynb`                                  | Hourly, engineered                                                            | MAE 7.22 / R² 0.911                                   | Breakthrough                                                             |
-| 4   | V2.5 best model                     | `xgboost_models/modelV2.5.ipynb`                                | 15-min, engineered                                                            | MAE 2.82 / RMSE 8.22 / R² 0.972                       | **Best**                                                                 |
-| 5   | LightGBM V2 & V2.5                  | `lightgbm_models/modelV2*.ipynb`                                | Same data, Optuna-tuned LightGBM                                              | Slightly better than XGBoost                          | LightGBM tuned ≈ wins                                                    |
-| 6   | V2.5.2 fair comparison              | `xgboost_models/modelV2.5.2.ipynb`                              | Both Optuna-tuned, MAE loss, 2000 trees, 10×5-fold TSS                        | XGB MAE 2.7652; **LGBM MAE 2.7167**                   | LightGBM ~1.8% better; much closer than before                           |
-| 7   | V2.5.1 risk feature                 | `xgboost_models/modelV2.5.1.ipynb`                              | ± `high_volatility_prob`, same data/split/params                              | Both models got ~1% **worse**                         | Feature rejected                                                         |
-| 8   | V3 grid features (default)          | `xgboost_models/modelV3.ipynb`                                  | V2.5 + 13 grid, **default params**                                            | MAE 2.847 (vs V2.5 2.82) — slightly worse             | Negative result; needs tuning                                            |
-| 9   | **V2.5.3 XGBoost Optuna**           | `xgboost_models/modelV2.5.3.ipynb`                              | MAE loss, 30 trials × 5-fold TS-CV, 2000 trees                                | MAE 2.7236 / RMSE 8.1642 / R² 0.9722                  | **Tuning > new features** — best production XGBoost                      |
-| 10  | V2.5.1.1 risk re-test               | `xgboost_models/modelV2.5.1.1.ipynb`                            | risk feature under TUNED model                                                | +0.0045 (still worse, smaller)                        | Risk feature robustly rejected                                           |
-| 11  | V3.1 grid re-test                   | `xgboost_models/modelV3.1.ipynb`                                | grid under TUNED model (V2.5.3 params)                                        | MAE 2.6982 (Δ −0.0361, helps)                         | **Tune first, then test features**                                       |
-| 12  | V3.1_live (grid lags)               | `xgboost_models/modelV3.1_live.ipynb`                           | lag-only grid (55), live-feasible                                             | +0.0180 (hurts)                                       | Grid NOT deployable as lag-only (superseded by live grid fetch)          |
-| 13  | Nuclear + V3.1 dataset              | `data/convertData/V3.1_15min_feature_engineering.ipynb`         | V3 + 6 nuclear features (shared dataset)                                      | `V3.1_15min_features.csv` (70 cols)                   | Shared with partner (his LightGBM "V3")                                  |
-| 14  | **XGBoost V4 (retrained)**          | `xgboost_models/modelV4.ipynb`                                  | single 68-feature model, Optuna 30×5, MAE loss                                | **MAE 2.7020 / RMSE 8.0376 / R² 0.9730** (CV 2.9053)  | **Best XGBoost — now live**                                              |
-| 15  | **LightGBM V3.1**                   | `lightgbm_models/modelV3.1.ipynb`                               | V3.1 dataset (68 feats), Optuna 30×5 then **V2.5 params**                     | CV 2.8485 → test **2.6390 / 7.8957 / 0.9740**         | Optuna overfit; V2.5 regularization transferred — **new best, now live** |
-| 16  | **Grid+nuclear live**               | `src/features.py`, `src/fetch_live.py`, `src/predict_system.py` | GridBuffer/NuclearBuffer + fetch_grid/fetch_nuclear (Fingrid)                 | `lightgbm_v3_1.pkl` runs daily with real grid/nuclear | Train/serve gap closed (2026-08-25)                                      |
-| 17  | **XGBoost V3/V3.1_enh/V4 promoted** | commit `0169a85`                                                | moved from `models/experiments/` → `models/saved/` (grid/nuclear now in src/) | 3 new live forecast CSVs (2026-08-25)                 | **All XGBoost grid/nuclear variants now live**                           |
+| #   | Experiment                             | Notebook                                                        | Setup                                                                         | Result                                                  | Verdict                                                                  |
+| --- | -------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 1   | V1 baseline                            | `xgboost_models/modelV1.ipynb`                                  | Hourly, weather only                                                          | MAE 33.13 / RMSE 46.34 / R² 0.107                       | Baseline                                                                 |
+| 2   | V1.5 resolution test                   | `xgboost_models/modelV1.5.ipynb`                                | 15-min, weather only                                                          | MAE 32.19 / R² 0.125                                    | Resolution alone ≈ no gain                                               |
+| 3   | V2 feature engineering                 | `xgboost_models/modelV2.ipynb`                                  | Hourly, engineered                                                            | MAE 7.22 / R² 0.911                                     | Breakthrough                                                             |
+| 4   | V2.5 best model                        | `xgboost_models/modelV2.5.ipynb`                                | 15-min, engineered                                                            | MAE 2.82 / RMSE 8.22 / R² 0.972                         | **Best**                                                                 |
+| 5   | LightGBM V2 & V2.5                     | `lightgbm_models/modelV2*.ipynb`                                | Same data, Optuna-tuned LightGBM                                              | Slightly better than XGBoost                            | LightGBM tuned ≈ wins                                                    |
+| 6   | V2.5.2 fair comparison                 | `xgboost_models/modelV2.5.2.ipynb`                              | Both Optuna-tuned, MAE loss, 2000 trees, 10×5-fold TSS                        | XGB MAE 2.7652; **LGBM MAE 2.7167**                     | LightGBM ~1.8% better; much closer than before                           |
+| 7   | V2.5.1 risk feature                    | `xgboost_models/modelV2.5.1.ipynb`                              | ± `high_volatility_prob`, same data/split/params                              | Both models got ~1% **worse**                           | Feature rejected                                                         |
+| 8   | V3 grid features (default)             | `xgboost_models/modelV3.ipynb`                                  | V2.5 + 13 grid, **default params**                                            | MAE 2.847 (vs V2.5 2.82) — slightly worse               | Negative result; needs tuning                                            |
+| 9   | **V2.5.3 XGBoost Optuna**              | `xgboost_models/modelV2.5.3.ipynb`                              | MAE loss, 30 trials × 5-fold TS-CV, 2000 trees                                | MAE 2.7236 / RMSE 8.1642 / R² 0.9722                    | **Tuning > new features** — best production XGBoost                      |
+| 10  | V2.5.1.1 risk re-test                  | `xgboost_models/modelV2.5.1.1.ipynb`                            | risk feature under TUNED model                                                | +0.0045 (still worse, smaller)                          | Risk feature robustly rejected                                           |
+| 11  | V3.1 grid re-test                      | `xgboost_models/modelV3.1.ipynb`                                | grid under TUNED model (V2.5.3 params)                                        | MAE 2.6982 (Δ −0.0361, helps)                           | **Tune first, then test features**                                       |
+| 12  | V3.1_live (grid lags)                  | `xgboost_models/modelV3.1_live.ipynb`                           | lag-only grid (55), live-feasible                                             | +0.0180 (hurts)                                         | Grid NOT deployable as lag-only (superseded by live grid fetch)          |
+| 13  | Nuclear + V3.1 dataset                 | `data/convertData/V3.1_15min_feature_engineering.ipynb`         | V3 + 6 nuclear features (shared dataset)                                      | `V3.1_15min_features.csv` (70 cols)                     | Shared with partner (his LightGBM "V3")                                  |
+| 14  | **XGBoost V4 (retrained)**             | `xgboost_models/modelV4.ipynb`                                  | single 68-feature model, Optuna 30×5, MAE loss                                | **MAE 2.7020 / RMSE 8.0376 / R² 0.9730** (CV 2.9053)    | **Best XGBoost — now live**                                              |
+| 15  | **LightGBM V3.1**                      | `lightgbm_models/modelV3.1.ipynb`                               | V3.1 dataset (68 feats), Optuna 30×5 then **V2.5 params**                     | CV 2.8485 → test **2.6390 / 7.8957 / 0.9740**           | Optuna overfit; V2.5 regularization transferred — **new best, now live** |
+| 16  | **Grid+nuclear live**                  | `src/features.py`, `src/fetch_live.py`, `src/predict_system.py` | GridBuffer/NuclearBuffer + fetch_grid/fetch_nuclear (Fingrid)                 | `lightgbm_v3_1.pkl` runs daily with real grid/nuclear   | Train/serve gap closed (2026-08-25)                                      |
+| 17  | **XGBoost V3/V3.1_enh/V4 promoted**    | commit `0169a85`                                                | moved from `models/experiments/` → `models/saved/` (grid/nuclear now in src/) | 3 new live forecast CSVs (2026-08-25)                   | **All XGBoost grid/nuclear variants now live**                           |
+| 18  | **Naive baseline (Yesterday's Price)** | `data_visualization/3.0_7day_recursive_backtest.ipynb`          | same V3.1 15-min test set as V3.1/V4 rows                                     | **MAE 31.72 / RMSE 51.19 / R² −0.09**                   | No-ML persistence ≫ model single-step (2.6)                              |
+| 19  | **True 7-day recursive backtest**      | `data_visualization/3.0_7day_recursive_backtest.ipynb`          | 31 windows × 672 steps, **no real price fed inside windows**                  | LGBM 37.29/59.77 · XGB **32.12/46.08** · Naive_7d 40.06 | Both beat Naive_7d; recursive ≈ 12× single-step MAE                      |
 
 ### 10.1 V2.5.2 details (fair XGBoost vs LightGBM)
 
@@ -401,6 +424,7 @@ One CSV per model (`<name>_forecasts.csv`) with columns: `run_date`, `target_dat
 - Data: `data/convertData/*.ipynb` (cleaning, feature engineering, risk feature).
 - Models: `xgboost_models/modelV*.ipynb`, `lightgbm_models/modelV2*.ipynb`, **`lightgbm_models/modelV3.1.ipynb`** (best model).
 - Visualization: `data_visualization/1.0_eda_and_forecast_visualization.ipynb`, `data_visualization/2.0_eda.ipynb`, `data_visualization/2.0_forecast_visualization.ipynb` (interactive Plotly, **no PNG saving** since 2026-08-25).
+- Backtest / honest eval: `data_visualization/3.0_7day_recursive_backtest.ipynb` (single-step vs true 7-day recursive + Naive baselines → §9.5).
 
 ### 11.6 Docs & automation
 
