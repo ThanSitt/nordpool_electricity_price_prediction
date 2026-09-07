@@ -35,7 +35,7 @@ MODEL_NAME = 'lightgbm_v3_1'   # 当前默认 = 全项目最好的模型（MAE 2
 - 每次改完 `MODEL_NAME`，**重新运行 Section 1 的 cell**，所有图和指标都会变成那个模型的。
 - 所以"模型评估"不是"评估最好的模型"，而是"**评估你指定的模型**"；默认给到最好的，方便你验证 README 里的数字。
 
-> 现在 `models/saved/` 里有 12 个 `.pkl`；`predictions/` 里有 13 个 `*_forecasts.csv`（其中 `xgboost_v3_1_enh` 有预测 CSV 但没有 pkl，是历史遗留；Section 2 只是读 CSV，所以不受影响）。
+> 现在 `models/saved/` 里有 12 个 `.pkl`；`predictions/` 里有对应的 12 个 `*_forecasts.csv`；`xgboost_v3_1_enh` 这一历史命名不再是当前仓库的正式模型名，Section 2 直接按当前 `models/saved/` 中存在的文件名读取即可。
 
 ---
 

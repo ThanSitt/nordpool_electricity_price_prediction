@@ -8,23 +8,30 @@ To maximize prefix cache hits and prevent Token waste, DO NOT re-scan full CSV d
 
 ## Dataset Evolution:
 
-- V1: 1-hour resolution, Temp & Wind (No Feature Engineering).
-- V1.5: 15-min resolution, Temp & Wind (No FE).
-- V2: 1-hour resolution + Feature Engineering (FE) applied.
-- V2.5: 15-min resolution + FE applied (includes Wind Direction).
-- V3: V2.5 + Cross-border grid transmission data (FE applied).
-- V3.1: V3 + Nuclear power data (FE applied).
+- V1: 1-hour resolution, weather-only baseline (temp + wind).
+- V1.5: 15-min resolution, weather-only baseline (temp + wind + direction).
+- V2: hourly engineered dataset (lags/rolling/calendar features).
+- V2.5: 15-min engineered dataset (49 features; same feature family as V2, but at 15-min resolution).
+- V3: V2.5 + cross-border grid transmission features.
+- V3.1: V2.5 + grid + nuclear features; this is the current shared dataset for the latest grid/nuclear experiments.
+
+## Canonical Current Naming (latest repo state):
+
+- XGBoost V3.1: grid-only tuned benchmark on dataset V3 (selected for fair comparison against the grid-added feature set).
+- XGBoost V4: grid + nuclear tuned model on dataset V3.1 (current best XGBoost).
+- LightGBM V3.1: grid + nuclear model on dataset V3.1, trained with transferred V2.5 regularization; current best overall model.
+- The repo's current canonical benchmark therefore compares XGBoost V4 vs LightGBM V3.1 on the shared V3.1 dataset.
 
 ## XGBoost Model Evolution (User's Pipeline):
 
 - V1 to V2.5: Trained on respective datasets using default parameters.
 - V2.5.1: Dataset V2.5 + High-Volatility Probability Feature (Hypothesis testing).
-- V2.5.2: Dataset V2.5 + Optuna Hyperparameter Tuning (Created for strict comparison against Teammate's LightGBM).
-- V2.5.3: Dataset V2.5 + Optuna + MAE Loss (Fixed default n_estimators issue; significant accuracy boost).
-- V2.5.1.1: Dataset V2.5 + High-Volatility Feature + Optuna (Backtesting the feature with proper tuning; found negligible impact).
-- V3: Dataset V3 + Default parameters (Temporary regression in tuning).
-- V3.1: Dataset V3 + Optuna Tuning.
-- V4: Dataset V3.1 (Nuclear added) + Optuna Tuning.
+- V2.5.2: Dataset V2.5 + Optuna Hyperparameter Tuning (Created for strict comparison against teammate's LightGBM).
+- V2.5.3: Dataset V2.5 + Optuna + MAE Loss (fixed default n_estimators issue; significant accuracy boost).
+- V2.5.1.1: Dataset V2.5 + High-Volatility Feature + Optuna (backtesting the feature with proper tuning; found negligible impact).
+- V3: Dataset V3 + default parameters (temporary regression in tuning).
+- V3.1: Dataset V3 + Optuna tuning (grid-only benchmark; not the same as the shared V3.1 dataset).
+- V4: Dataset V3.1 + Optuna tuning (grid + nuclear; latest best XGBoost).
 
 ## Project Framework:
 

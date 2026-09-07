@@ -41,9 +41,11 @@ Live:       APIs → Build Features → Load Saved Model → Predict 7 Days → 
 | V2.5                                   | Full engineered (49)                               | 2.82       | 8.22       | 0.972      | 15-min + engineered (default XGBoost)                     |
 | V2.5.3                                 | Full engineered (49), Optuna-tuned                 | 2.7236     | 8.1642     | 0.9722     | Best production XGBoost                                   |
 | V3 (XGBoost)                           | + grid flows (62), default params                  | 2.847      | 8.368      | 0.971      | Grid hurt at default                                      |
-| V3.1 (XGBoost)                         | + grid flows (62), Optuna-tuned                    | 2.6982     | 7.9724     | 0.9735     | Grid helps under tuned model — live                       |
-| **V4 (XGBoost)**                       | + grid + nuclear (68), **Optuna-tuned**            | **2.7020** | **8.0376** | **0.9730** | **Best XGBoost — live**                                   |
+| V3.1 (XGBoost)                         | + grid flows (62), Optuna-tuned                    | 2.6982     | 7.9724     | 0.9735     | Grid helps under tuned model — benchmark                  |
+| **V4 (XGBoost)**                       | + grid + nuclear (68), **Optuna-tuned**            | **2.7020** | **8.0376** | **0.9730** | **Best XGBoost on the shared V3.1 dataset**               |
 | **LightGBM V3.1**                      | + grid + nuclear (68), **V2.5 params**             | **2.6390** | **7.8957** | **0.9740** | **Best model overall — live**                             |
+
+> Current canonical naming: the latest benchmark compares XGBoost V4 vs LightGBM V3.1 on the shared V3.1 dataset (`V3.1_15min_features.csv`). The V3.1 label is algorithm-specific: the tuned grid-only XGBoost benchmark and the final grid+nuclear LightGBM benchmark are both evaluated on the same current feature set.
 
 ### Key Findings
 
@@ -108,9 +110,9 @@ nordpool_electricity_price_prediction/
 │   └── modelV3.1.ipynb              ← V3.1: grid + nuclear (best, live)
 │
 ├── models/
-│   └── saved/                       ← Live predictor models (.pkl) — 13 models
-│       ├── xgboost_v1/v1_5/v2/v2_5/v2_5_2/v2_5_3/v3/v3_1_enh/v4.pkl
-│       └── lightgbm_v2/v2_5/v2_5_2/v3_1.pkl
+│   └── saved/                       ← Live predictor models (.pkl) — 12 models
+│       ├── xgboost_v1.pkl / xgboost_v1_5.pkl / xgboost_v2.pkl / xgboost_v2_5.pkl / xgboost_v2_5_2.pkl / xgboost_v2_5_3.pkl / xgboost_v3.pkl / xgboost_v4.pkl
+│       └── lightgbm_v2.pkl / lightgbm_v2_5.pkl / lightgbm_v2_5_2.pkl / lightgbm_v3_1.pkl
 │
 ├── src/                             ← Live prediction source code
 │   ├── config.py                    ← Configuration (paths, API URLs)
@@ -153,7 +155,7 @@ nordpool_electricity_price_prediction/
 
 ### In this project
 
-Both algorithms are trained on the same data with the same features. The LightGBM versions use Optuna tuning and perform slightly better. The **best model overall is LightGBM V3.1** (grid + nuclear, MAE 2.6390). All **13 saved models** in `models/saved/` — including the promoted XGBoost V3/V3.1_enh/V4 (grid + nuclear) — are loaded and run by the live predictor every day.
+Both algorithms are trained on the same data with the same features. The LightGBM versions use Optuna tuning and perform slightly better. The **best model overall is LightGBM V3.1** (grid + nuclear, MAE 2.6390). The current live fleet in `models/saved/` consists of the actual saved bundles present in the repo today: 12 `.pkl` files in total, including the current XGBoost V3/V4 and LightGBM V3.1 variants.
 
 ---
 
@@ -238,7 +240,7 @@ Start: python src/predict_system.py
   │     └─ Builds holiday flags
   │
   ├─ 3. predict_system.py
-  │     ├─ Loads all 13 models from models/saved/
+  │     ├─ Loads the saved model bundles present in models/saved/
   │     ├─ Recursively forecasts 7 days for each model
   │     ├─ Saves one CSV per model into predictions/
   │     └─ Fills in actual prices when they become available
